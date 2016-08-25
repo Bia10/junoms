@@ -165,6 +165,34 @@ getrandom(void* buf, i64 nbytes, u32 flags)
 		);
 }
 
+u8 rol(u8 v, u8 n)
+{
+	u8 msb;
+
+	for(u8 i = 0; i < n; ++i)
+	{
+		msb = v & 0x80 ? 1 : 0;
+		v <<= 1;
+		v |= msb;
+	}
+
+	return v;
+}
+
+u8 ror(u8 v, u8 n) // 1kpp hype
+{
+	u8 lsb;
+
+	for(u8 i = 0; i < n; ++i)
+	{
+		lsb = v & 1 ? 0x80 : 0;
+		v >>= 1;
+		v |= lsb;
+	}
+
+	return v;
+}
+
 // ---
 
 char 
@@ -233,7 +261,7 @@ itoa(u8 base, i64 val, char* buf, i64 width, char filler)
 }
 
 void
-memcpy(u8* dst, u8* src, i64 nbytes)
+memcpy(void* dst, void* src, i64 nbytes)
 {
 	i64 i = 0;
 
@@ -248,8 +276,11 @@ memcpy(u8* dst, u8* src, i64 nbytes)
 	}
 	else 
 	{
+		u8* dst_bytes = (u8*)dst;
+		u8* src_bytes = (u8*)src;
+
 		for (; i < nbytes; ++i) {
-			dst[i] = src[i];
+			dst_bytes[i] = src_bytes[i];
 		}
 	}
 }
@@ -607,8 +638,10 @@ aes_transform(u8* input, u8* output, u8* key, u8 key_size)
 	}
 }
 
+// ---
+
 void
-aes_ofb_transform(u8* buf, u8* iv, i64 nbytes)
+maple_aes_ofb_transform(u8* buf, u8* iv, i64 nbytes)
 {
 	u8 aeskey[32] = {
 		0x13, 0x00, 0x00, 0x00,
@@ -676,8 +709,6 @@ aes_ofb_transform(u8* buf, u8* iv, i64 nbytes)
 	memcpy(input, output, 16);
 }
 
-// ---
-
 // lol idk some fucked up key routine used to shuffle the iv
 void maple_shuffle_iv(u8* iv) {
 	unsigned char shit[256] = 
@@ -728,35 +759,7 @@ void maple_shuffle_iv(u8* iv) {
 	memcpy(iv, new_iv, 4);
 }
 
-u8 rol(u8 v, u8 n)
-{
-	u8 msb;
-
-	for(u8 i = 0; i < n; ++i)
-	{
-		msb = v & 0x80 ? 1 : 0;
-		v <<= 1;
-		v |= msb;
-	}
-
-	return v;
-}
-
-u8 ror(u8 v, u8 n) // 1kpp hype
-{
-	u8 lsb;
-
-	for(u8 i = 0; i < n; ++i)
-	{
-		lsb = v & 1 ? 0x80 : 0;
-		v >>= 1;
-		v |= lsb;
-	}
-
-	return v;
-}
-
-void maple_crypt(u8* buf, u64 nbytes)
+void maple_encrypt(u8* buf, u64 nbytes)
 {
 	u64 j;
 	u8 a, c;
@@ -864,6 +867,86 @@ void maple_decrypt(u8* buf, u64 nbytes)
 	}
 }
 
+#define maple_version 62
+#define maple_encrypted_hdr_size 4
+
+u32
+maple_encrypted_hdr(u8* iv, u16 nbytes)
+{
+	u16* low_iv = (u16*)(iv + 2);
+
+	u16 iiv = *low_iv;
+
+	u16 version = maple_version;
+	version = 0xFFFF - version;
+	iiv ^= version;
+
+	u16 xorediv = iiv ^ nbytes;
+
+	return (u32)xorediv | ((u32)iiv << 16);
+}
+
+// ---
+
+// used to build packets everywhere
+u8 packet_buf[10000];
+
+void
+p_encode2(u8** p, u16 v);
+
+u8*
+p_new(u16 hdr, u8* buf) {
+	u8* res = buf;
+	p_encode2(&res, hdr);
+	return res;
+}
+
+void
+p_encode1(u8** p, u8 v) {
+	*(*p)++ = v;
+}
+
+void
+p_encode2(u8** p, u16 v)
+{
+	memcpy(*p, &v, 2);
+	*p += 2;
+}
+
+void
+p_encode4(u8** p, u32 v)
+{
+	memcpy(*p, &v, 4);
+	*p += 4;
+}
+
+void
+p_encode8(u8** p, u64 v)
+{
+	memcpy(*p, &v, 8);
+	*p += 8;
+}
+
+void
+p_append(u8** p, u8* buf, u64 nbytes)
+{
+	memcpy(*p, buf, nbytes);
+	*p += nbytes;
+}
+
+void
+p_encode_buf(u8** p, u8* buf, u16 nbytes)
+{
+	p_encode2(p, nbytes);
+	p_append(p, buf, nbytes);
+}
+
+void
+p_encode_str(u8** p, char* str)
+{
+	p_encode_buf(p, (u8*)str, strlen(str));
+}
+
 // ---
 
 char fmtbuf[1024]; // used to format strings
@@ -879,10 +962,79 @@ void print_bytes(u8* buf, u64 nbytes)
 	}
 }
 
+void print_bytes_pre(char* prefix, u8* buf, u64 nbytes)
+{
+	puts("\n");
+	puts(prefix);
+	puts(" ");
+	print_bytes(buf, nbytes);
+	puts("\n");
+}
+
+#if JMS_DEBUG_SEND
+#define dbg_send_print_packet print_bytes_pre
+#else
+#define dbg_send_print_packet(prefix, buf, nbytes)
+#endif
+
+#if JMS_DEBUG_ENCRYPTION && JMS_DEBUG_SEND
+#define dbg_send_print_encrypted_packet print_bytes_pre
+#else
+#define dbg_send_print_encrypted_packet(prefix, buf, nbytes)
+#endif
+
+#if JMS_DEBUG_RECV
+#define dbg_recv_print_packet print_bytes_pre
+#else
+#define dbg_recv_print_packet(prefix, buf, nbytes)
+#endif
+
+#if JMS_DEBUG_ENCRYPTION && JMS_DEBUG_SEND
+#define dbg_recv_print_encrypted_packet print_bytes_pre
+#else
+#define dbg_recv_print_encrypted_packet(prefix, buf, nbytes)
+#endif
+
+// ---
+
+// NOTE: this is ENCRYPTED send. to send unencrypted data, just use write.
+i64
+jms_send(int fd, u8* iv_send, u8* packet, u16 nbytes)
+{
+	u32 encrypted_hdr = maple_encrypted_hdr(iv_send, nbytes);
+
+#if JMS_DEBUG_ENCRYPTION && JMS_DEBUG_RECV
+	puts("\n-> Encrypted header ");
+
+	uitoa(16, encrypted_hdr, fmtbuf, 8, '0');
+	prln(fmtbuf);
+#endif
+
+	if (write(fd, &encrypted_hdr, maple_encrypted_hdr_size) < 0) {
+		return -1;
+	}
+	
+	dbg_send_print_packet("->", packet, nbytes);
+
+	maple_encrypt(packet, nbytes);
+	dbg_send_print_encrypted_packet("-> Maple Encrypted:", packet, nbytes);
+
+	maple_aes_ofb_transform(packet, iv_send, nbytes);
+	dbg_send_print_encrypted_packet("-> Encrypted:", packet, nbytes);
+
+	maple_shuffle_iv(iv_send);
+
+	return write(fd, packet, nbytes);
+}
+
+// ---
+
+#define maple_handshake 0x000D
+
 int
 main()
 {
-	prln("JunoMS pre-alpha v0.0.2");
+	prln("JunoMS pre-alpha v0.0.3");
 
 	int sockfd = socket(af_inet, sock_stream, 0);
 	if (sockfd < 0) {
@@ -915,35 +1067,33 @@ main()
 
 	prln("Client connected");
 
-	u8 handshake[15];
-	u8* p = handshake;
-	
-	*(u16*)p = 0x000D; // handshake header
-	p += 2;
+	u8 iv_recv[4];
+	u8 iv_send[4];
 
-	*(u32*)p = 62; // version
-	p += 4;
-
-	if (getrandom(p, 8, 0) != 8) {
+	if (getrandom(iv_recv, 4, 0) != 4 || getrandom(iv_send, 4, 0) != 4) {
 		die("Failed to generate random IV's");
 		return 1;
 	}
 
-	u8* iv_recv = p;
-	//u8* iv_send = p + 4;
+	// build handshake packet
+	u8* p = p_new(maple_handshake, packet_buf);
+	p_encode4(&p, maple_version); // maple version
+	p_append(&p, iv_recv, 4); 
+	p_append(&p, iv_send, 4); 
+	p_encode1(&p, 8); // region
 
-	p += 8;
-
-	*p = 8; // GMS region
-
-	if (write(clientfd, handshake, 15) < 0) {
+	if (write(clientfd, packet_buf, p - packet_buf) < 0) {
 		die("Failed to send handshake packet");
 		return 1;
 	}
 
-	i64 encrypted_hdr_size = 4;
-	u32 encrypted_hdr = 0;
+#if JMS_DEBUG_SEND
+	puts("Sent handshake packet: ");
+	print_bytes(packet_buf, p - packet_buf);
+	puts("\n");
+#endif
 
+	u32 encrypted_hdr = 0;
 	u8 buf[10000]; // used to read the body of the packet
 
 	i64 nread;
@@ -954,7 +1104,7 @@ main()
 
 		while (nread < sizeof(encrypted_hdr))
 		{
-			i64 cb = read(clientfd, &encrypted_hdr, encrypted_hdr_size);
+			i64 cb = read(clientfd, &encrypted_hdr, maple_encrypted_hdr_size);
 			if (cb < 0) {
 				die("Socket error");
 				return 1;
@@ -963,20 +1113,22 @@ main()
 			nread += cb;
 		}
 
-
-		puts("\nGot encrypted header ");
-
-		uitoa(16, encrypted_hdr, fmtbuf, 8, '0');
-		puts(fmtbuf);
-
+		// decode packet length from header
 		u32 packet_len = 
 			(encrypted_hdr & 0x0000FFFF) ^ 
 			(encrypted_hdr >> 16);
 
-		puts(" -> packet length: ");
+#if JMS_DEBUG_ENCRYPTION && JMS_DEBUG_RECV
+		puts("\n<- Encrypted header ");
+
+		uitoa(16, encrypted_hdr, fmtbuf, 8, '0');
+		puts(fmtbuf);
+
+		puts(", packet length: ");
 
 		uitoa(10, (u64)packet_len, fmtbuf, 0, 0);
 		prln(fmtbuf);
+#endif
 
 		nread = 0;
 		while (nread < packet_len)
@@ -990,28 +1142,13 @@ main()
 			nread += cb;
 		}
 
-#if 0
-		puts("Encrypted: ");
-		print_bytes(buf, packet_len);
-		puts("\n");
-#endif
+		dbg_recv_print_encrypted_packet("<- Encrypted:", buf, packet_len);
 
-		aes_ofb_transform(buf, iv_recv, packet_len);
-
-#if 0
-		puts("AES Decrypted: ");
-		print_bytes(buf, packet_len);
-		puts("\n");
-#endif
+		maple_aes_ofb_transform(buf, iv_recv, packet_len);
+		dbg_recv_print_encrypted_packet("<- AES Decrypted:", buf, packet_len);
 
 		maple_decrypt(buf, packet_len);
-
-#if 0
-		puts("Maple Decrypted: ");
-#endif
-
-		print_bytes(buf, packet_len);
-		puts("\n");
+		dbg_recv_print_packet("<-", buf, packet_len);
 
 		maple_shuffle_iv(iv_recv);
 	}
