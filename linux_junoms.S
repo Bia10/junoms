@@ -22,7 +22,7 @@
 		ret
 
 	/* syscalls */
-	.globl syscall1, syscall2, syscall3
+	.globl syscall1, syscall2, syscall3, syscall4, syscall5
 
 	syscall1:
 		mov rax,rdi
@@ -41,6 +41,25 @@
 		mov rdi,rsi /* arg1 */
 		mov rsi,rdx /* arg2 */
 		mov rdx,rcx /* arg3 */
+		syscall
+		ret
+
+	syscall4:
+		mov rax,rdi
+		mov rdi,rsi
+		mov rsi,rdx
+		mov rdx,rcx
+		mov r10,r8
+		syscall
+		ret
+
+	syscall5:
+		mov rax,rdi
+		mov rdi,rsi
+		mov rsi,rdx
+		mov rdx,rcx
+		mov r10,r8
+		mov r8,r9
 		syscall
 		ret
 

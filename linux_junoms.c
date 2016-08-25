@@ -151,6 +151,30 @@ accept(int sockfd, sockaddr_in* addr)
 		);
 }
 
+#define ipproto_tcp 6
+
+#define tcp_nodelay 1
+
+int
+setsockopt(int sockfd, i32 level, i32 optname, void* optval, u32 optlen)
+{
+	return (int)(i64)
+		syscall5(
+			SYS_setsockopt, 
+			(void*)(i64)sockfd,
+			(void*)(i64)level, 
+			(void*)(i64)optname, 
+			optval, 
+			(void*)(i64)optlen
+		);
+}
+
+// forces a flush of the pending packets on the next send
+int
+tcp_force_flush(int sockfd, b32 enabled) {
+	return setsockopt(sockfd, ipproto_tcp, tcp_nodelay, &enabled, sizeof(b32));
+}
+
 // ---
 
 i64
@@ -260,6 +284,76 @@ itoa(u8 base, i64 val, char* buf, i64 width, char filler)
 	return uitoa(base, (u64)val, buf, width, filler);
 }
 
+int
+atoui(char* str, u8 base, u64* res)
+{
+	if (base > 16) {
+		return -1;
+	}
+
+	u64 prev = 0;
+
+	*res = 0;
+
+	for (; *str; ++str)
+	{
+		*res *= base;
+
+		char c = tolower(*str);
+
+		if (base <= 10 && c >= '0' && c <= '0' + (base - 1))
+		{
+			*res += (u64)(c - '0'); 
+		}
+
+		else if (base > 10 && c >= 'a' && c <= 'a' + (base - 11))
+		{
+			*res += (u64)(c - 'a') + 10;
+		}
+
+		if (*res < prev)
+		{
+			// overflow
+			return -1;
+		}
+
+		prev = *res;
+	}
+
+	return 0;
+}
+
+int
+atoi(char* str, u8 base, i64* res)
+{
+	b32 negative = *str == '-';
+
+	if (*str == '-' || *str == '+') 
+	{
+		++str;
+	}
+
+	u64 ures;
+	if (atoui(str, base, &ures) < 0)
+	{
+		return -1;
+	}
+
+	if (ures > 0x7fffffffffffffff) 
+	{
+		// overflow
+		return -1;
+	}
+
+	*res = (i64)ures;
+
+	if (negative) {
+		*res = -*res;
+	}
+
+	return 0;
+}
+
 void
 memcpy(void* dst, void* src, i64 nbytes)
 {
@@ -288,6 +382,52 @@ memcpy(void* dst, void* src, i64 nbytes)
 void
 strcpy(char* dst, char* src) {
 	memcpy((u8*)dst, (u8*)src, strlen(src) + 1);
+}
+
+b32
+streq(char* a, char* b)
+{
+	for (; *a && *b; ++a, ++b)
+	{
+		if (*a != *b) {
+			return 0;
+		}
+	}
+
+	return *a == *b;
+}
+
+b32
+strneq(char* a, char* b, i64 len)
+{
+	i64 i;
+
+	for (i = 0; i < len && a[i] && b[i]; ++i) 
+	{
+		if (a[i] != b[i]) {
+			return 0;
+		}
+	}
+
+	if (i == len) {
+		--i;
+	}
+
+	return a[i] == b[i];
+}
+
+char* strstr(char* haystack, char* needle)
+{
+	i64 len = strlen(needle);
+
+	for(; *haystack; ++haystack) 
+	{
+		if (strneq(haystack, needle, len)) {
+			return haystack;
+		}
+	}
+
+	return 0;
 }
 
 // ---
@@ -873,23 +1013,30 @@ void maple_decrypt(u8* buf, u64 nbytes)
 u32
 maple_encrypted_hdr(u8* iv, u16 nbytes)
 {
-	u16* low_iv = (u16*)(iv + 2);
+	// the lowest 16 bits are the high part of the send IV, xored with 
+	// ffff - mapleversion (or -(mapleversion + 1)).
+	//
+	// the highest 16 bits are the low part xored with the size of the packet
+	// to obtain the packet size we simply hor the low part with the high part
+	// again
 
-	u16 iiv = *low_iv;
+	u16* high_iv = (u16*)(iv + 2);
+
+	u16 lowpart = *high_iv;
 
 	u16 version = maple_version;
 	version = 0xFFFF - version;
-	iiv ^= version;
+	lowpart ^= version;
 
-	u16 xorediv = iiv ^ nbytes;
+	u16 hipart = lowpart ^ nbytes;
 
-	return (u32)xorediv | ((u32)iiv << 16);
+	return (u32)lowpart | ((u32)hipart << 16);
 }
 
 // ---
 
 // used to build packets everywhere
-u8 packet_buf[10000];
+u8 packet_buf[0x10000];
 
 void
 p_encode2(u8** p, u16 v);
@@ -907,31 +1054,25 @@ p_encode1(u8** p, u8 v) {
 }
 
 void
-p_encode2(u8** p, u16 v)
-{
-	memcpy(*p, &v, 2);
-	*p += 2;
-}
-
-void
-p_encode4(u8** p, u32 v)
-{
-	memcpy(*p, &v, 4);
-	*p += 4;
-}
-
-void
-p_encode8(u8** p, u64 v)
-{
-	memcpy(*p, &v, 8);
-	*p += 8;
-}
-
-void
-p_append(u8** p, u8* buf, u64 nbytes)
+p_append(u8** p, void* buf, u64 nbytes)
 {
 	memcpy(*p, buf, nbytes);
 	*p += nbytes;
+}
+
+void
+p_encode2(u8** p, u16 v) {
+	p_append(p, &v, 2);
+}
+
+void
+p_encode4(u8** p, u32 v) {
+	p_append(p, &v, 4);
+}
+
+void
+p_encode8(u8** p, u64 v) {
+	p_append(p, &v, 8);
 }
 
 void
@@ -942,14 +1083,59 @@ p_encode_buf(u8** p, u8* buf, u16 nbytes)
 }
 
 void
-p_encode_str(u8** p, char* str)
-{
+p_encode_str(u8** p, char* str) {
 	p_encode_buf(p, (u8*)str, strlen(str));
+}
+
+u8
+p_decode1(u8** p) {
+	return *(*p)++;
+}
+
+void
+p_get_bytes(u8** p, void* dst, u64 nbytes)
+{
+	memcpy(dst, *p, nbytes);
+	*p += nbytes;
+}
+
+u16
+p_decode2(u8** p) {
+	u16 res;
+	p_get_bytes(p, &res, 2);
+	return res;
+}
+
+u32
+p_decode4(u8** p) {
+	u32 res;
+	p_get_bytes(p, &res, 4);
+	return res;
+}
+
+u64
+p_decode8(u8** p) {
+	u64 res;
+	p_get_bytes(p, &res, 8);
+	return res;
+}
+
+u16
+p_decode_buf(u8** p, u8* buf) {
+	u16 len = p_decode2(p);
+	p_get_bytes(p, buf, len);
+	return len;
+}
+
+void
+p_decode_str(u8** p, char* str) {
+	u16 len = p_decode_buf(p, (u8*)str);
+	str[len] = 0;
 }
 
 // ---
 
-char fmtbuf[1024]; // used to format strings
+char fmtbuf[0x10000]; // used to format strings
 
 void print_bytes(u8* buf, u64 nbytes)
 {
@@ -989,7 +1175,7 @@ void print_bytes_pre(char* prefix, u8* buf, u64 nbytes)
 #define dbg_recv_print_packet(prefix, buf, nbytes)
 #endif
 
-#if JMS_DEBUG_ENCRYPTION && JMS_DEBUG_SEND
+#if JMS_DEBUG_ENCRYPTION && JMS_DEBUG_RECV
 #define dbg_recv_print_encrypted_packet print_bytes_pre
 #else
 #define dbg_recv_print_encrypted_packet(prefix, buf, nbytes)
@@ -997,11 +1183,19 @@ void print_bytes_pre(char* prefix, u8* buf, u64 nbytes)
 
 // ---
 
+typedef struct 
+{
+	int fd;
+	u8 iv_send[4];
+	u8 iv_recv[4];
+}
+jms_connection;
+
 // NOTE: this is ENCRYPTED send. to send unencrypted data, just use write.
 i64
-jms_send(int fd, u8* iv_send, u8* packet, u16 nbytes)
+jms_send(jms_connection* con, u8* packet, u16 nbytes)
 {
-	u32 encrypted_hdr = maple_encrypted_hdr(iv_send, nbytes);
+	u32 encrypted_hdr = maple_encrypted_hdr(con->iv_send, nbytes);
 
 #if JMS_DEBUG_ENCRYPTION && JMS_DEBUG_RECV
 	puts("\n-> Encrypted header ");
@@ -1010,7 +1204,10 @@ jms_send(int fd, u8* iv_send, u8* packet, u16 nbytes)
 	prln(fmtbuf);
 #endif
 
-	if (write(fd, &encrypted_hdr, maple_encrypted_hdr_size) < 0) {
+	if (write(con->fd, &encrypted_hdr, maple_encrypted_hdr_size) != 
+			maple_encrypted_hdr_size) 
+	{
+		prln("W: failed to write encrypted header");
 		return -1;
 	}
 	
@@ -1019,24 +1216,128 @@ jms_send(int fd, u8* iv_send, u8* packet, u16 nbytes)
 	maple_encrypt(packet, nbytes);
 	dbg_send_print_encrypted_packet("-> Maple Encrypted:", packet, nbytes);
 
-	maple_aes_ofb_transform(packet, iv_send, nbytes);
+	maple_aes_ofb_transform(packet, con->iv_send, nbytes);
 	dbg_send_print_encrypted_packet("-> Encrypted:", packet, nbytes);
 
-	maple_shuffle_iv(iv_send);
+	maple_shuffle_iv(con->iv_send);
 
-	return write(fd, packet, nbytes);
+	tcp_force_flush(con->fd, 1);
+	i64 res = write(con->fd, packet, nbytes);
+	tcp_force_flush(con->fd, 0);
+
+	return res;
 }
 
 // ---
 
-#define maple_handshake 0x000D
+// common
+#define out_handshake	0x000D
+#define out_ping		0x0011
+
+#define in_pong	0x0018
+
+// login server
+#define in_login_password			0x0001
+#define in_after_login				0x0009
+#define in_server_list_request		0x000B
+#define in_server_list_rerequest	0x0004
+#define in_server_status_request	0x0006
+#define in_view_all_char			0x000D
+#define in_relog					0x001C
+#define in_charlist_request			0x0005
+#define in_char_select				0x0013
+#define in_check_char_name			0x0016
+#define in_delete_char				0x0017
+#define in_set_gender				0x0008
+#define in_register_pin				0x000A
+#define in_guest_login				0x0002
+
+#define out_login_status			0x0000
+#define out_server_status			0x0003
+#define out_pin_operation			0x0006
+#define out_all_char_list			0x0008
+#define out_server_list				0x000A
+#define out_char_list				0x000B
+#define out_server_ip				0x000C
+#define out_char_name_response		0x000D
+#define out_add_new_char_entry		0x000E
+#define out_delete_char_response	0x000F
+#define out_relog_response			0x0016
+#define out_gender_done				0x0004
+#define out_pin_assigned			0x0007
+
+// channel server
+#define in_load_character		0x0014
+#define in_player_update		0x00C0
+#define in_change_map_special	0x005C
+#define in_change_map			0x0023
+#define in_move_player			0x0026
+
+#define out_warp_to_map			0x005C
+#define out_server_message		0x0041
+#define out_change_channel		0x0010
+#define out_update_stats		0x001C
+
+void
+jms_auth_success_request_pin(jms_connection* con, char* user)
+{
+	u8 tacos[] = {
+		0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 
+		0xFF, 0x6A, 0x01, 0x00, 
+		0x00, // player status (set gender, set pin)
+		0x00, // admin ? disables trading and enables gm commands if true
+		0x4E, // gm related flag, not sure
+	};
+
+	// ???
+	u8 pizza[] = {
+		0x03, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xDC, 
+		0x3D, 0x0B, 0x28, 0x64, 0xC5, 0x01, 0x08, 0x00, 0x00, 0x00, 
+	};
+
+	u8* p = p_new(out_login_status, packet_buf);
+	p_append(&p, tacos, sizeof(tacos));
+	p_encode_str(&p, user);
+	p_append(&p, pizza, sizeof(pizza));
+
+	jms_send(con, packet_buf, p - packet_buf);
+}
+
+#define jms_login_id_deleted			3
+#define jms_login_incorrect_password	4
+#define jms_login_not_registered		5
+#define jms_login_sys_err_1				6
+#define jms_login_already_logged		7
+#define jms_login_sys_err_2				8
+#define jms_login_sys_err_3				9
+#define jms_login_too_many_1			10
+#define jms_login_not_20				11
+#define jms_login_gm_wrong_ip			13
+#define jms_login_wrong_gateway_1		14
+#define jms_login_too_many_2			15
+#define jms_login_unverified_1			16
+#define jms_login_wrong_gateway_2		17
+#define jms_login_unverified_2			21
+#define jms_login_license				23
+#define jms_login_ems_notice			25
+#define jms_login_trial					27
+
+void
+jms_login_failed(jms_connection* con, u32 reason)
+{
+	u8* p = p_new(out_login_status, packet_buf);
+	p_encode4(&p, reason);
+	p_encode2(&p, 0);
+
+	jms_send(con, packet_buf, p - packet_buf);
+}
 
 int
 main()
 {
-	prln("JunoMS pre-alpha v0.0.3");
+	prln("JunoMS pre-alpha v0.0.4");
 
-	int sockfd = socket(af_inet, sock_stream, 0);
+	int sockfd = socket(af_inet, sock_stream, ipproto_tcp);
 	if (sockfd < 0) {
 		die("Failed to create socket");
 		return 1;
@@ -1058,34 +1359,38 @@ main()
 
 	prln("Listening...");
 
+	jms_connection con = {0};
+
 	sockaddr_in client_addr = {0};
-	int clientfd = accept(sockfd, &client_addr);
-	if (clientfd < 0) {
+	con.fd = accept(sockfd, &client_addr);
+	if (con.fd < 0) {
 		die("Failed to accept connection from client");
 		return 1;
 	}
 
 	prln("Client connected");
 
-	u8 iv_recv[4];
-	u8 iv_send[4];
-
-	if (getrandom(iv_recv, 4, 0) != 4 || getrandom(iv_send, 4, 0) != 4) {
+	if (getrandom(con.iv_recv, 4, 0) != 4 || getrandom(con.iv_send, 4, 0) != 4) 
+	{
 		die("Failed to generate random IV's");
 		return 1;
 	}
 
+	// ---
+
 	// build handshake packet
-	u8* p = p_new(maple_handshake, packet_buf);
+	u8* p = p_new(out_handshake, packet_buf);
 	p_encode4(&p, maple_version); // maple version
-	p_append(&p, iv_recv, 4); 
-	p_append(&p, iv_send, 4); 
+	p_append(&p, con.iv_recv, 4); 
+	p_append(&p, con.iv_send, 4); 
 	p_encode1(&p, 8); // region
 
-	if (write(clientfd, packet_buf, p - packet_buf) < 0) {
+	tcp_force_flush(con.fd, 1);
+	if (write(con.fd, packet_buf, p - packet_buf) < 0) {
 		die("Failed to send handshake packet");
 		return 1;
 	}
+	tcp_force_flush(con.fd, 0);
 
 #if JMS_DEBUG_SEND
 	puts("Sent handshake packet: ");
@@ -1093,18 +1398,25 @@ main()
 	puts("\n");
 #endif
 
+	// ---
+	
 	u32 encrypted_hdr = 0;
-	u8 buf[10000]; // used to read the body of the packet
-
 	i64 nread;
+
+	struct {
+		char user[12];
+		b32 logged_in;
+	} 
+	player = {{0}, 0};
 
 	while (1)
 	{
+		// encrypted header ----------------------------------------------------
 		nread = 0;
 
 		while (nread < sizeof(encrypted_hdr))
 		{
-			i64 cb = read(clientfd, &encrypted_hdr, maple_encrypted_hdr_size);
+			i64 cb = read(con.fd, &encrypted_hdr, maple_encrypted_hdr_size);
 			if (cb < 0) {
 				die("Socket error");
 				return 1;
@@ -1130,11 +1442,13 @@ main()
 		prln(fmtbuf);
 #endif
 
+		// packet body ---------------------------------------------------------
 		nread = 0;
 		while (nread < packet_len)
 		{
-			i64 cb = read(clientfd, buf, 10000);
-			if (cb < 0) {
+			i64 cb = read(con.fd, packet_buf, packet_len - nread);
+			if (cb < 0) 
+			{
 				die("Socket error");
 				return 1;
 			}
@@ -1142,18 +1456,78 @@ main()
 			nread += cb;
 		}
 
-		dbg_recv_print_encrypted_packet("<- Encrypted:", buf, packet_len);
+		dbg_recv_print_encrypted_packet("<- Encrypted", packet_buf, packet_len);
 
-		maple_aes_ofb_transform(buf, iv_recv, packet_len);
-		dbg_recv_print_encrypted_packet("<- AES Decrypted:", buf, packet_len);
+		maple_aes_ofb_transform(packet_buf, con.iv_recv, packet_len);
+		dbg_recv_print_encrypted_packet(
+				"<- AES Decrypted", packet_buf, packet_len);
 
-		maple_decrypt(buf, packet_len);
-		dbg_recv_print_packet("<-", buf, packet_len);
+		maple_decrypt(packet_buf, packet_len);
+		dbg_recv_print_packet("<-", packet_buf, packet_len);
 
-		maple_shuffle_iv(iv_recv);
+		maple_shuffle_iv(con.iv_recv);
+
+		// handle packet -------------------------------------------------------
+		u8* p = packet_buf;
+		u16 hdr = p_decode2(&p);
+
+		switch (hdr)
+		{
+		case in_login_password:
+			p_decode_str(&p, fmtbuf);
+
+			// ignore retarded long usernames
+			if (strlen(fmtbuf) > sizeof(player.user) - 1) 
+			{
+				jms_login_failed(&con, jms_login_not_registered);
+				break;
+			}
+
+			puts(fmtbuf);
+			puts(" logging in");
+
+			if (!streq(fmtbuf, "asdasd")) 
+			{
+				char* p = fmtbuf;
+				for (; *p && *p < '0' && *p > '9'; ++p);
+
+				if (strstr(fmtbuf, "error") == fmtbuf) 
+				{
+					u64 reason;
+
+					if (atoui(p, 10, &reason) < 0) {
+						jms_login_failed(&con, jms_login_not_registered);
+					}
+					
+					else {
+						jms_login_failed(&con, (u32)reason);
+					}
+				}
+
+				else {
+					jms_login_failed(&con, jms_login_not_registered);
+				}
+				
+				break;
+			}
+
+			strcpy(player.user, fmtbuf);
+
+			// password
+			p_decode_str(&p, fmtbuf);
+
+			if (!streq(fmtbuf, "asdasd")) {
+				jms_login_failed(&con, jms_login_incorrect_password);
+				break;
+			}
+
+			player.logged_in = 1;
+			jms_auth_success_request_pin(&con, player.user);
+			break;
+		}
 	}
 
-	close(clientfd);
+	close(con.fd);
 	close(sockfd);
 
 	return 0;

@@ -9,6 +9,7 @@
 #define SYS_accept		43
 #define SYS_bind		49
 #define SYS_listen		50
+#define SYS_setsockopt	54
 
 #define SYS_exit 		60
 #define SYS_kill		62
@@ -18,7 +19,25 @@
 #ifndef JMS_SYSCALLS_ASM 
 typedef unsigned long long syscall_t;
 
-void* syscall1(syscall_t number, void* arg);
-void* syscall2(syscall_t number, void* arg1, void* arg2);
-void* syscall3(syscall_t number, void* arg1, void* arg2, void* arg3);
+void* 
+syscall1(syscall_t number, void* arg);
+
+void* 
+syscall2(syscall_t number, void* arg1, void* arg2);
+
+void* 
+syscall3(syscall_t number, void* arg1, void* arg2, void* arg3);
+
+void* 
+syscall4(syscall_t number, void* arg1, void* arg2, void* arg3, void* arg4);
+
+void*
+syscall5(
+	syscall_t number, 
+	void* arg1, 
+	void* arg2, 
+	void* arg3, 
+	void* arg4, 
+	void* arg5
+);
 #endif
