@@ -1351,7 +1351,7 @@ send(connection* con, u8* packet, u16 nbytes)
 #define in_relog					0x001C
 #define in_charlist_request			0x0005
 #define in_char_select				0x0013
-#define in_check_char_name			0x0016
+#define in_check_char_name			0x0015
 #define in_delete_char				0x0017
 #define in_set_gender				0x0008
 #define in_register_pin				0x000A
@@ -1835,7 +1835,7 @@ char_name_response(connection* con, char* name, b32 used)
 int
 main()
 {
-	prln("JunoMS pre-alpha v0.0.5");
+	prln("JunoMS pre-alpha v0.0.6");
 
 	int sockfd = socket(af_inet, sock_stream, ipproto_tcp);
 	if (sockfd < 0) {
