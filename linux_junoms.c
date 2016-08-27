@@ -884,7 +884,7 @@ maple_aes_ofb_transform(u8* buf, u8* iv, i64 nbytes)
 	// last chunk
 	aes_transform(input, output, aeskey, 32);
 
-	i64 offset = chunks * 16;
+	i64 offset = (chunks - 1) * 16;
 
 	for (u8 j = 0; j < 16; ++j) {
 		plaintext[j] = output[j] ^ buf[offset + j];
@@ -896,7 +896,7 @@ maple_aes_ofb_transform(u8* buf, u8* iv, i64 nbytes)
 
 // lol idk some fucked up key routine used to shuffle the iv
 void maple_shuffle_iv(u8* iv) {
-	unsigned char shit[256] = 
+	u8 shit[256] = 
 	{
 		0xec, 0x3f, 0x77, 0xa4, 0x45, 0xd0, 0x71, 0xbf, 0xb7, 0x98, 0x20, 0xfc,
 		0x4b, 0xe9, 0xb3, 0xe1, 0x5c, 0x22, 0xf7, 0x0c,	0x44, 0x1b, 0x81, 0xbd, 
@@ -944,59 +944,45 @@ void maple_shuffle_iv(u8* iv) {
 	memcpy(iv, new_iv, 4);
 }
 
-void maple_encrypt(u8* buf, u64 nbytes)
+void maple_encrypt(u8* buf, i32 nbytes)
 {
-	u64 j;
+	i32 j;
 	u8 a, c;
 
 	for (u8 i = 0; i < 3; ++i)
 	{
 		a = 0;
 
-		j = nbytes;
-		while (1)
+		for (j = nbytes; j > 0; --j)
 		{
 			c = buf[nbytes - j];
 			c = rol(c, 3);
-			c += j;
+			c = (u8)((i32)c + j);
 			c ^= a;
 			a = c;
 			c = ror(a, j);
 			c ^= 0xFF;
 			c += 0x48;
 			buf[nbytes - j] = c;
-
-			if (!j) {
-				break;
-			}
-
-			--j;
 		}
 
 		a = 0;
 
-		j = nbytes;
-		while (1)
+		for (j = nbytes; j > 0; --j)
 		{
 			c = buf[j - 1];
 			c = rol(c, 4);
-			c += j;
+			c = (u8)((i32)c + j);
 			c ^= a;
 			a = c;
 			c ^= 0x13;
 			c = ror(c, 3);
 			buf[j - 1] = c;
-
-			if (!j) {
-				break;
-			}
-
-			--j;
 		}
 	}
 }
 
-void maple_decrypt(u8* buf, u64 nbytes)
+void maple_decrypt(u8* buf, i32 nbytes)
 {
 	i32 j;
 	u8 a, b, c;
@@ -1006,31 +992,23 @@ void maple_decrypt(u8* buf, u64 nbytes)
 		a = 0;
 		b = 0;
 
-		j = nbytes;
-		while (1)
+		for (j = nbytes; j > 0; --j)
 		{
 			c = buf[j - 1];
 			c = rol(c, 3);
 			c ^= 0x13;
 			a = c;
 			c ^= b;
-			c -= j;
+			c = (u8)((i32)c - j);
 			c = ror(c, 4);
 			b = a;
 			buf[j - 1] = c;
-
-			if (!j) {
-				break;
-			}
-
-			--j;
 		}
 
 		a = 0;
 		b = 0;
 
-		j = nbytes;
-		while (1)
+		for (j = nbytes; j > 0; --j)
 		{
 			c = buf[nbytes - j];
 			c -= 0x48;
@@ -1038,16 +1016,10 @@ void maple_decrypt(u8* buf, u64 nbytes)
 			c = rol(c, j);
 			a = c;
 			c ^= b;
-			c -= j;
+			c = (u8)((i32)c - j);
 			c = ror(c, 3);
 			b = a;
 			buf[nbytes - j] = c;
-
-			if (!j) {
-				break;
-			}
-
-			--j;
 		}
 	}
 }
@@ -1863,7 +1835,7 @@ char_name_response(connection* con, char* name, b32 used)
 int
 main()
 {
-	prln("JunoMS pre-alpha v0.0.4");
+	prln("JunoMS pre-alpha v0.0.5");
 
 	int sockfd = socket(af_inet, sock_stream, ipproto_tcp);
 	if (sockfd < 0) {
