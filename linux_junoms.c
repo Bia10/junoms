@@ -1526,11 +1526,24 @@ world_entry_append_channel(u8** p, u8 worldid, u8 id, char* name, u32 pop)
 	p_encode2(p, (u16)id);
 }
 
-void
-world_entry_end(connection* con, u8* p)
+typedef struct
 {
-	p_encode2(&p, 0); // this is supposed to be a message list but it doesn't 
-					  // seem to work in v62
+	u16 x, y;
+	char msg[64];
+}
+world_bubble;
+
+void
+world_entry_end(connection* con, u8* p, u16 nbubbles, world_bubble* bubbles)
+{
+	p_encode2(&p, nbubbles);
+
+	for (u16 i = 0; i < nbubbles; ++i)
+	{
+		p_encode2(&p, bubbles[i].x);
+		p_encode2(&p, bubbles[i].y);
+		p_encode_str(&p, bubbles[i].msg);
+	}
 
 	send(con, packet_buf, p - packet_buf);
 }
@@ -1937,6 +1950,51 @@ main()
 
 	ch.equips[3].slot = -equip_weapon;
 	ch.equips[3].id = 1302000;
+	
+	// ---
+
+	u16 cx1 = 40, cy1 = 300;
+	u16 cx2 = 40, cy2 = 190;
+	u16 my = cy2 + (cy1 - cy2) / 2;
+
+	world_bubble bubbles[]  = {
+		{ 100, 100, "install gentoo" }, 
+
+		{ cx1 - 40, cy1, "@" }, 
+		{ cx1 - 25, cy1 + 30, "@" }, 
+		{ cx1 - 25, cy1 - 30, "@" }, 
+		{ cx1, cy1 - 40, "@" }, 
+		{ cx1, cy1 + 40, "@" }, 
+
+		{ cx1 + 40, cy1, "@" }, 
+		{ cx1 + 25, cy1 + 30, "@" }, 
+		{ cx1 + 25, cy1 - 30, "@" }, 
+
+		{ cx2 - 40, cy2, "@" }, 
+		{ cx2 - 25, cy2 + 30, "@" }, 
+		{ cx2 - 25, cy2 - 30, "@" }, 
+		{ cx2, cy2 - 40, "@" }, 
+		{ cx2, cy2 + 40, "@" }, 
+
+		{ cx2 + 40, cy2, "@" }, 
+		{ cx2 + 25, cy2 + 30, "@" }, 
+		{ cx2 + 25, cy2 - 30, "@" }, 
+
+		{ cx1 + 40, my - 30, "@" }, 
+		{ cx1 + 40, my + 30, "@" }, 
+		{ cx1 + 70, my - 30, "@" }, 
+		{ cx1 + 70, my + 30, "@" }, 
+		{ cx1 + 100, my - 30, "@" }, 
+		{ cx1 + 100, my + 30, "@" }, 
+		{ cx1 + 130, my - 30, "@" }, 
+		{ cx1 + 130, my + 30, "@" }, 
+		{ cx1 + 160, my - 30, "@" }, 
+		{ cx1 + 160, my + 30, "@" }, 
+		{ cx1 + 190, my - 30, "@" }, 
+		{ cx1 + 190, my + 30, "@" }, 
+		{ cx1 + 220, my - 10, "@" }, 
+		{ cx1 + 220, my + 10, "@" }, 
+	};
 
 	// ---
 
@@ -2041,7 +2099,7 @@ main()
 			u8* p = world_entry_begin(
 				0, 
 				"Memes World 0", 
-				ribbon_e, 
+				ribbon_no, 
 				":^)", 
 				100, 
 				100, 
@@ -2052,7 +2110,8 @@ main()
 			world_entry_append_channel(&p, 0, 0, "Memes World 0-1", 10);
 			world_entry_append_channel(&p, 0, 1, "Memes World 0-2", 0);
 
-			world_entry_end(&con, p);
+			world_entry_end(&con, p, array_count(bubbles), bubbles);
+
 			world_list_end(&con);
 			break;
 		}
