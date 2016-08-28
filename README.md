@@ -8,6 +8,8 @@ I have learned many things from developing
 is matching kagami's current functionality with way smaller executable size, 
 no dependencies, no stdlib and proceed from there.
 
+THIS CODE IS PUBLIC DOMAIN. YOU ARE FREE TO DO WHATEVER THE FUCK YOU WANT.
+
 Current status:
 
 * Only handles 1 player at once for testing purposes
