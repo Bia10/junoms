@@ -236,6 +236,20 @@ filetime_to_unix(u64 filetime) {
 	return (filetime - epoch_diff) / (1000LL * 10000LL);
 }
 
+#define clock_realtime 0
+
+typedef struct
+{
+	i64 sec;
+	i64 nsec;
+}
+timespec;
+
+int
+clock_gettime(u32 clock_id, timespec* ts) {
+	return (int)(i64)syscall2(SYS_clock_gettime, (void*)(i64)clock_id, ts);
+}
+
 // ---
 
 char 
@@ -1414,7 +1428,7 @@ maple_write(connection* con, u8* packet, u16 nbytes)
 // ---
 
 // common
-#define out_ping		0x0011
+#define out_ping 0x0011
 
 #define in_pong	0x0018
 
@@ -1754,6 +1768,7 @@ typedef struct
 	u32 map;
 	u8 spawn;
 
+	// TODO: replace this with a full inventory
 	u8 nequips;
 	equip_data equips[equipped_slots];
 
@@ -1761,11 +1776,14 @@ typedef struct
 	i32 world_rank_move;
 	u32 job_rank;
 	i32 job_rank_move;
+
+	u8 buddy_list_size;
+	i32 meso;
 }
 character_data;
 
 void
-char_data_encode(u8** p, character_data* c)
+char_data_encode_stats(u8** p, character_data* c)
 {
 	u8 huehue[24] = {0};
 
@@ -1794,6 +1812,12 @@ char_data_encode(u8** p, character_data* c)
 	p_encode4(p, c->map);
 	p_encode1(p, c->spawn);
 	p_encode4(p, 0);
+}
+
+void
+char_data_encode(u8** p, character_data* c)
+{
+	char_data_encode_stats(p, c);
 
 	// equips
 	p_encode1(p, c->gender);
@@ -1937,6 +1961,92 @@ connect_ip(connection* con, u8* ip, u16 port, u32 char_id)
 	maple_write(con, packet_buf, p - packet_buf);
 }
 
+void
+connect_data(connection* con, u8 channel_id, character_data* c)
+{
+	u8 rngseed[12];
+	if (getrandom(&rngseed, sizeof(rngseed), 0) != sizeof(rngseed)) {
+		prln("W: getrandom failed for rng seed");
+	}
+
+	u8* p = p_new(out_warp_to_map, packet_buf);
+	p_encode4(&p, (u32)channel_id); // why 4 bytes?
+	p_encode1(&p, 1);
+	p_encode1(&p, 1);
+	p_encode2(&p, 0);
+	p_append(&p, rngseed, sizeof(rngseed));
+
+	p_encode8(&p, (u64)-1);
+
+	char_data_encode_stats(&p, c);
+
+	p_encode1(&p, c->buddy_list_size);
+	p_encode4(&p, c->meso);
+	
+	// TODO: inventory
+	p_encode1(&p, 24);
+	p_encode1(&p, 24);
+	p_encode1(&p, 24);
+	p_encode1(&p, 24);
+	p_encode1(&p, 24);
+
+	p_encode2(&p, 0);
+
+	// equip
+	p_encode1(&p, 0);
+	
+	// use
+	p_encode1(&p, 0);
+
+	// setup
+	p_encode1(&p, 0);
+
+	// etc
+	p_encode1(&p, 0);
+
+	// cash
+	p_encode1(&p, 0);
+
+	p_encode2(&p, 0); // TODO: skills
+	p_encode2(&p, 0);
+
+	p_encode2(&p, 0); // TODO: quest info
+	p_encode2(&p, 0);
+
+	p_encode8(&p, 0); 
+	
+	// TODO: rings
+
+	u8 hentai[] = { 0xFF, 0xC9, 0x9A, 0x3B };
+	for (u8 i = 0; i < 15; ++i) {
+		p_append(&p, hentai, sizeof(hentai));
+	}
+
+	p_encode4(&p, 0);
+
+	timespec ts = {0};
+	clock_gettime(clock_realtime, &ts);
+	p_encode8(&p, ts.sec * 1000 + ts.nsec / 1000000);
+
+	maple_write(con, packet_buf, p - packet_buf);
+}
+
+#define server_message_notice			0
+#define server_message_popup			1
+#define server_message_mega				2
+#define server_message_smega			3
+#define server_message_scrolling_hdr	4
+#define server_message_pink_text		5
+#define server_message_light_blue_text	6
+
+void
+scrolling_header(connection* con, char* header)
+{
+	u8* p = p_new(out_server_message, packet_buf);
+	p_encode1(&p, server_message_scrolling_hdr);
+	p_encode_str(&p, header);
+}
+
 // ---
 
 #define max_char_slots	36
@@ -2001,6 +2111,8 @@ typedef struct
 	u16 exp_percent;
 	u16 drop_percent;
 	u16 nchannels;
+	char header[0x10000];
+
 	channel_data channels[max_channels];
 }
 world_data;
@@ -2014,6 +2126,7 @@ world_data hardcoded_worlds[] =
 		100, // % exp
 		100, // % drop
 		2, // channels
+		"VoHiYo", // header
 		{
 			{ "Meme World 0-1",	200,	7201 }, 
 			{ "Meme World 0-2",	0,		7202 }, 
@@ -2348,7 +2461,22 @@ channel_server(int sockfd, client_data* player)
 
 		switch (hdr)
 		{
-		
+		case in_load_character:
+		{
+			u32 char_id = p_decode4(&p);
+			if (char_id != player->char_id) {
+				prln("Dropped client that was trying to perform remote hack");
+				goto cleanup;
+			}
+
+			connect_data(&con, player->channel, &characters[0]);
+
+			char* header = hardcoded_worlds[player->world].header;
+			if (strlen(header)) {
+				scrolling_header(&con, header);
+			}
+			break;
+		}
 
 		// ---------------------------------------------------------------------
 		
@@ -2365,7 +2493,7 @@ cleanup:
 int
 main()
 {
-	prln("JunoMS pre-alpha v0.0.7");
+	prln("JunoMS pre-alpha v0.0.8");
 
 	client_data player;
 
