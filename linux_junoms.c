@@ -14,6 +14,7 @@ typedef i32	b32;
 
 // TODO: find reliable ways to ensure that these types are the size I expect 
 
+#define global_var static
 #define array_count(a) (sizeof(a) / sizeof((a)[0]))
 
 // ---
@@ -495,6 +496,7 @@ char* strstr(char* haystack, char* needle)
 // TODO: learn more about AES and clean up this code
 
 // https://en.wikipedia.org/wiki/Rijndael_key_schedule
+global_var
 u8 aes_rcon[256] = 
 {
     0x8d, 0x01, 0x02, 0x04, 0x08, 0x10, 0x20, 0x40, 0x80, 0x1b, 0x36, 0x6c, 
@@ -522,6 +524,7 @@ u8 aes_rcon[256] =
 };
 
 // https://en.wikipedia.org/wiki/Rijndael_S-box
+global_var
 u8 aes_sbox[256] = 
 {
     0x63, 0x7c, 0x77, 0x7b, 0xf2, 0x6b, 0x6f, 0xc5, 
@@ -1067,6 +1070,7 @@ maple_encrypted_hdr(u8* iv, u16 nbytes)
 // ---
 
 // used to build packets everywhere
+global_var
 u8 packet_buf[0x10000];
 
 void
@@ -1166,6 +1170,7 @@ p_decode_str(u8** p, char* str) {
 
 // ---
 
+global_var
 char fmtbuf[0x10000]; // used to format strings
 
 void print_bytes(u8* buf, u64 nbytes)
@@ -2050,6 +2055,7 @@ scrolling_header(connection* con, char* header)
 // ---
 
 #define max_char_slots	36
+#define max_worlds		15
 #define max_channels	20
 
 u16
@@ -2110,35 +2116,57 @@ typedef struct
 	char message[64];
 	u16 exp_percent;
 	u16 drop_percent;
-	u16 nchannels;
 	char header[0x10000];
 
+	u16 nchannels;
 	channel_data channels[max_channels];
 }
 world_data;
 
-world_data hardcoded_worlds[] =
-{
-	{
-		"Meme World 0",
-		ribbon_no, 
-		":^)", 
-		100, // % exp
-		100, // % drop
-		2, // channels
-		"VoHiYo", // header
-		{
-			{ "Meme World 0-1",	200,	7201 }, 
-			{ "Meme World 0-2",	0,		7202 }, 
-			{{0}}
-		}
-	}, 
-};
+global_var
+u8 nhardcoded_worlds;
 
+global_var
+world_data hardcoded_worlds[max_worlds];
+
+u8
+get_hardcoded_worlds(world_data* w)
+{
+	u8 nworlds = 1;
+	u16 baseport = 7200;
+
+	strcpy(w->name, "Meme World 0");
+	w->ribbon = ribbon_no;
+	w->exp_percent = 100;
+	w->drop_percent = 100;
+	strcpy(w->header, "VoHiYo");
+
+	w->nchannels = 2;
+
+	channel_data* c = w->channels;
+	strcpy(c->name, "Meme World 0-1");
+	c->population = 200;
+	c->port = ++baseport;
+
+	++c;
+
+	strcpy(c->name, "Meme World 0-2");
+	c->population = 0;
+	c->port = ++baseport;
+
+	return nworlds;
+}
+
+global_var
 char* hardcoded_user = "asdasd";
+
+global_var
 char* hardcoded_pass = "asdasd";
 
+global_var
 u64 hardcoded_ban_unix_time = 1474848000LL; // some time in 2017
+
+global_var
 u16 hardcoded_char_slots = 3;
 
 typedef struct {
@@ -2302,7 +2330,7 @@ login_server(int sockfd, client_data* player)
 		case in_server_list_request:
 		case in_server_list_rerequest: // why the fuck are there 2 hdrs for this
 		{
-			for (u8 i = 0; i < array_count(hardcoded_worlds); ++i)
+			for (u8 i = 0; i < nhardcoded_worlds; ++i)
 			{
 				world_data* world = &hardcoded_worlds[i];
 				u8* p = world_entry_begin(
@@ -2493,11 +2521,13 @@ cleanup:
 int
 main()
 {
-	prln("JunoMS pre-alpha v0.0.8");
+	prln("JunoMS pre-alpha v0.0.9");
 
 	client_data player;
 
 	// ---
+
+	nhardcoded_worlds = get_hardcoded_worlds(hardcoded_worlds);
 
 	while (1)
 	{
