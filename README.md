@@ -16,6 +16,8 @@ Current status:
 * Equips are correctly displayed in character selection
 * Gets in-game and spawns in you in Henesys
 
+![http://www.hnng.moe/f/Gdl]
+
 Goal roadmap:
 * Implement most basic in-game functionality using the current hardcoded 
   accounts/character testbed
