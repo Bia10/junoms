@@ -1490,16 +1490,18 @@ maple_write(connection* con, u8* packet, u16 nbytes)
 #define out_pin_assigned			0x0007
 
 // channel server
-#define in_load_character		0x0014
+#define in_player_load			0x0014
 #define in_player_update		0x00C0
-#define in_change_map_special	0x005C
-#define in_change_map			0x0023
-#define in_move_player			0x0026
+#define in_player_move			0x0026
+#define in_player_info			0x0059
 
-#define out_warp_to_map			0x005C
 #define out_server_message		0x0041
-#define out_change_channel		0x0010
-#define out_update_stats		0x001C
+#define out_channel_change		0x0010
+#define out_stats_update		0x001C
+#define out_map_change			0x005C
+#define out_player_info			0x003A
+#define out_player_movement		0x008D
+#define out_player_spawn		0x0078
 
 void
 ping(connection* con)
@@ -2068,11 +2070,8 @@ char_data_encode_stats(u8** p, character_data* c)
 }
 
 void
-char_data_encode(u8** p, character_data* c)
+char_data_encode_look(u8**p, character_data* c)
 {
-	char_data_encode_stats(p, c);
-
-	// equips
 	p_encode1(p, c->gender);
 	p_encode1(p, c->skin);
 	p_encode4(p, c->face);
@@ -2135,8 +2134,16 @@ char_data_encode(u8** p, character_data* c)
 	p_encode1(p, 0xFF); // list terminator?
 	p_encode4(p, c->cover_equips[equip_weapon].id); // cash weapon
 
-	u8 ayylmao[12] = {0};
-	p_append(p, ayylmao, sizeof(ayylmao));
+	for (u8 i = 0; i < max_pets; ++i) {
+		p_encode4(p, 0); // TODO: encode pet id's
+	}
+}
+
+void
+char_data_encode(u8** p, character_data* c)
+{
+	char_data_encode_stats(p, c);
+	char_data_encode_look(p, c);
 
 	// rankings
 	p_encode1(p, 1); // enabled / disabled
@@ -2204,11 +2211,22 @@ connect_ip(connection* con, u8* ip, u16 port, u32 char_id)
 void
 connect_data(connection* con, u8 channel_id, character_data* c)
 {
-	u8* p = p_new(out_warp_to_map, packet_buf);
+	u8* p = p_new(out_map_change, packet_buf);
 	p_encode4(&p, (u32)channel_id); // why 4 bytes?
 	p_encode1(&p, 1); // portal counter (the one used in map rushers)
 	p_encode1(&p, 1); // flag that indicates that it's a connect packet
-	p_encode2(&p, 0); // apparently shows a message if nonzero
+
+#if 0
+	// some multiline message that disappears in like 3 seconds
+	// disabled because it's useless and it looks bad
+
+	p_encode2(&p, 2); // line count
+	p_encode_str(&p, "Hello"); // title
+	p_encode_str(&p, "I have no idea what this ui is");
+	p_encode_str(&p, "but it disappears pretty fast");
+#else
+	p_encode2(&p, 0);
+#endif
 
 	u8 rngseed[12];
 	if (getrandom(&rngseed, sizeof(rngseed), 0) != sizeof(rngseed)) {
@@ -2294,6 +2312,418 @@ connect_data(connection* con, u8 channel_id, character_data* c)
 
 	p_encode4(&p, 0);
 	p_encode8(&p, filetime_now());
+
+	maple_write(con, packet_buf, p - packet_buf);
+}
+
+void
+player_info(connection* con, character_data* c, b32 is_self)
+{
+	u8* p = p_new(out_player_info, packet_buf);
+	p_encode4(&p, c->id);
+	p_encode1(&p, c->level);
+	p_encode2(&p, c->job);
+	p_encode2(&p, c->fame);
+	p_encode1(&p, 0); // married flag
+	p_encode_str(&p, "-"); // guild
+	p_encode_str(&p, ""); // guild alliance
+	p_encode1(&p, is_self ? 1 : 0);
+
+	// TODO: pets info
+	p_encode1(&p, 0);
+
+	p_encode1(&p, 0); // has mount ?
+	// TODO: mount info
+	
+	p_encode1(&p, 0); // wishlist size
+	// TODO: wishlist info
+	
+	// TODO: monster book
+	// TODO: check if v62 has monster book (prob not)
+	p_encode4(&p, 0);
+	p_encode4(&p, 0);
+	p_encode4(&p, 0);
+	p_encode4(&p, 0);
+	p_encode4(&p, 0);
+
+	maple_write(con, packet_buf, p - packet_buf);
+}
+
+void
+player_spawn(connection* con, character_data* c)
+{
+	u8* p = p_new(out_player_spawn, packet_buf);
+	p_encode4(&p, c->id);
+	p_encode_str(&p, c->name);
+
+	p_encode_str(&p, ""); // guild
+	p_encode2(&p, 0); // guild logo bg
+	p_encode1(&p, 0); // guild logo bg color
+	p_encode2(&p, 0); // guild logo
+	p_encode1(&p, 0); // guild logo color
+
+	// --
+
+	// TODO: buff map values
+	p_encode4(&p, 0);
+	p_encode4(&p, 1);
+	p_encode1(&p, 0);
+	p_encode2(&p, 0);
+	p_encode1(&p, 0xF8);
+	p_encode8(&p, 0); // buff bitmask
+
+	// this is bullshit from odin that will be removed
+	u32 rnd;
+	getrandom(&rnd, sizeof(u32), 0);
+
+	p_encode4(&p, 0);
+	p_encode2(&p, 0);
+	p_encode4(&p, rnd);
+	p_encode8(&p, 0);
+	p_encode2(&p, 0);
+	p_encode4(&p, rnd);
+	p_encode8(&p, 0);
+	p_encode2(&p, 0);
+	p_encode4(&p, rnd);
+	p_encode2(&p, 0);
+
+	// mount shit
+	p_encode4(&p, 0);
+	p_encode4(&p, 0);
+	p_encode4(&p, rnd);
+
+	p_encode8(&p, 0);
+	p_encode4(&p, rnd);
+	p_encode8(&p, 0);
+	p_encode4(&p, 0);
+	p_encode2(&p, 0);
+	p_encode4(&p, rnd);
+	p_encode4(&p, 0);
+	p_encode1(&p, 0x40);
+	p_encode1(&p, 1);
+	
+	// --
+
+	char_data_encode_look(&p, c);
+	
+	// --
+	
+	p_encode4(&p, 0);
+	p_encode4(&p, 0);
+	p_encode4(&p, 0);
+	
+	p_encode2(&p, 0); // x
+	p_encode2(&p, 0); // y
+	p_encode1(&p, 0); // stance
+	p_encode4(&p, 0);
+	p_encode4(&p, 1);
+	p_encode8(&p, 0);
+
+	p_encode1(&p, 0);
+	p_encode1(&p, 0); // chalkboard shit
+	p_encode4(&p, 0); // rings shit
+
+	// --
+
+	maple_write(con, packet_buf, p - packet_buf);
+}
+
+#define movement_normal1		0
+#define movement_jump			1
+#define movement_knockback		2
+#define movement_unk1			3
+#define movement_teleport		4
+#define movement_normal2		5
+#define movement_flashjump		6
+#define movement_assaulter		7
+#define movement_assassinate	8
+#define movement_rush			9
+#define movement_falling		10
+#define movement_chair			11
+#define movement_excessive_kb	12
+#define movement_recoil_shot	13
+#define movement_unk2			14
+#define movement_jump_down		15
+#define movement_wings			16
+#define movement_wings_falling	17
+
+typedef struct
+{
+	u16 foothold;
+	u16 x, y;
+	u8 stance;
+	u8 type;
+
+	union
+	{
+		struct
+		{
+			u8 unk1;
+		}
+		as_falling;
+
+		struct
+		{
+			u8 unk1;
+			u16 unk2;
+			u32 unk3;
+		}
+		as_wings, 
+		as_excessive_kb;
+
+		struct
+		{
+			u16 unk1;
+			u16 unk2;
+			u16 unk3;
+		}
+		as_wings_falling;
+
+		struct
+		{
+			u8 unk1;
+			u32 unk2;
+			u32 unk3;
+		}
+		as_unk2;
+
+		struct
+		{
+			u32 unk1;
+			u16 unk2;
+		}
+		as_normal1, 
+		as_normal2;
+
+		struct
+		{
+			u16 unk1;
+			u32 unk2;
+			u16 unk3;
+		}
+		as_jump_down;
+
+		struct
+		{
+			u16 unk1;
+		}
+		as_chair;
+
+		struct
+		{
+			u32 unk1;
+		}
+		as_unk1, 
+		as_teleport, 
+		as_assaulter, 
+		as_assassinate, 
+		as_rush;
+	};
+}
+movement_data;
+
+u8
+movement_data_decode(u8** p, movement_data* movements)
+{
+	u8 count = p_decode1(p);
+
+	for (u8 i = 0; i < count; ++i)
+	{
+		movement_data* m = &movements[i];
+
+		u8 type = p_decode1(p);
+		m->type = type; // TODO: check if same as stance
+
+		switch (type)
+		{
+			case movement_falling:
+				m->as_falling.unk1 = p_decode1(p);
+				break;
+
+			case movement_wings:
+			case movement_excessive_kb:
+				m->as_wings.unk1 = p_decode1(p);
+				m->as_wings.unk2 = p_decode2(p);
+				m->as_wings.unk3 = p_decode4(p);
+				break;
+
+			case movement_wings_falling:
+				m->x = p_decode2(p);
+				m->y = p_decode2(p);
+				m->foothold = p_decode2(p);
+				m->stance = p_decode1(p);
+				m->as_wings_falling.unk1 = p_decode2(p);
+				m->as_wings_falling.unk2 = p_decode2(p);
+				m->as_wings_falling.unk3 = p_decode2(p);
+				break;
+
+			case movement_unk2:
+				m->as_unk2.unk1 = p_decode1(p);
+				m->as_unk2.unk2 = p_decode4(p);
+				m->as_unk2.unk3 = p_decode4(p);
+				break;
+
+			case movement_normal1:
+			case movement_normal2:
+				m->x = p_decode2(p);
+				m->y = p_decode2(p);
+				m->as_normal1.unk1 = p_decode4(p);
+				m->foothold = p_decode2(p);
+				m->stance = p_decode1(p);
+				m->as_normal1.unk2 = p_decode2(p);
+				break;
+
+			case movement_jump:
+			case movement_knockback:
+			case movement_flashjump:
+			case movement_recoil_shot:
+				m->x = p_decode2(p);
+				m->y = p_decode2(p);
+				m->stance = p_decode1(p);
+				m->foothold = p_decode2(p);
+				break;
+
+			case movement_jump_down:
+				m->x = p_decode2(p);
+				m->y = p_decode2(p);
+				m->as_jump_down.unk1 = p_decode2(p);
+				m->as_jump_down.unk2 = p_decode4(p);
+				m->foothold = p_decode2(p);
+				m->stance = p_decode1(p);
+				m->as_jump_down.unk3 = p_decode2(p);
+				break;
+
+			case movement_chair:
+				m->x = p_decode2(p);
+				m->y = p_decode2(p);
+				m->foothold = p_decode2(p);
+				m->stance = p_decode1(p);
+				m->as_chair.unk1 = p_decode2(p);
+				break;
+
+			case movement_unk1:
+			case movement_teleport:
+			case movement_assaulter:
+			case movement_assassinate:
+			case movement_rush:
+				m->x = p_decode2(p);
+				m->y = p_decode2(p);
+				m->as_unk1.unk1 = p_decode4(p);
+				m->stance = p_decode1(p);
+				break;
+
+			default:
+				prln("W: invalid movement received");
+				return 0;
+		}
+	}
+
+	return count;
+}
+
+void
+movement_data_encode(u8** p, movement_data* movements, u8 nmovements)
+{
+	p_encode1(p, nmovements);
+
+	for (u8 i = 0; i < nmovements; ++i)
+	{
+		movement_data* m = &movements[i];
+		p_encode1(p, m->type);
+
+		switch (m->type)
+		{
+			case movement_falling:
+				p_encode1(p, m->as_falling.unk1);
+				break;
+
+			case movement_wings:
+			case movement_excessive_kb:
+				p_encode1(p, m->as_wings.unk1);
+				p_encode2(p, m->as_wings.unk2);
+				p_encode4(p, m->as_wings.unk3);
+				// same mem layout as excessive_kb
+				break;
+
+			case movement_wings_falling:
+				p_encode2(p, m->x);
+				p_encode2(p, m->y);
+				p_encode2(p, m->foothold);
+				p_encode1(p, m->stance);
+				p_encode2(p, m->as_wings_falling.unk1);
+				p_encode2(p, m->as_wings_falling.unk2);
+				p_encode2(p, m->as_wings_falling.unk3);
+				break;
+
+			case movement_unk2:
+				p_encode1(p, m->as_unk2.unk1);
+				p_encode4(p, m->as_unk2.unk2);
+				p_encode4(p, m->as_unk2.unk3);
+				break;
+
+			case movement_normal1:
+			case movement_normal2:
+				p_encode2(p, m->x);
+				p_encode2(p, m->y);
+				p_encode4(p, m->as_normal1.unk1);
+				p_encode2(p, m->foothold);
+				p_encode1(p, m->stance);
+				p_encode2(p, m->as_normal1.unk2);
+				break;
+
+			case movement_jump:
+			case movement_knockback:
+			case movement_flashjump:
+			case movement_recoil_shot:
+				p_encode2(p, m->x);
+				p_encode2(p, m->y);
+				p_encode1(p, m->stance);
+				p_encode2(p, m->foothold);
+				break;
+
+			case movement_jump_down:
+				p_encode2(p, m->x);
+				p_encode2(p, m->y);
+				p_encode2(p, m->as_jump_down.unk1);
+				p_encode4(p, m->as_jump_down.unk2);
+				p_encode2(p, m->foothold);
+				p_encode1(p, m->stance);
+				p_encode2(p, m->as_jump_down.unk3);
+				break;
+
+			case movement_chair:
+				p_encode2(p, m->x);
+				p_encode2(p, m->y);
+				p_encode2(p, m->foothold);
+				p_encode1(p, m->stance);
+				p_encode2(p, m->as_chair.unk1);
+				break;
+
+			case movement_unk1:
+			case movement_teleport:
+			case movement_assaulter:
+			case movement_assassinate:
+			case movement_rush:
+				p_encode2(p, m->x);
+				p_encode2(p, m->y);
+				p_encode4(p, m->as_teleport.unk1);
+				p_encode1(p, m->stance);
+				break;
+
+			default:
+				prln("W: tried to send invalid movement");
+				return;
+		}
+	}
+}
+
+void
+show_moving(connection* con, u32 player_id, movement_data* m, u8 nmovements)
+{
+	u8* p = p_new(out_player_movement, packet_buf);
+	p_encode4(&p, player_id);
+	p_encode4(&p, 0);
+	movement_data_encode(&p, m, nmovements);
 
 	maple_write(con, packet_buf, p - packet_buf);
 }
@@ -2485,6 +2915,7 @@ typedef struct {
 	u8 world;
 	u8 channel;
 	u32 char_id;
+	b32 in_game;
 }
 client_data;
 
@@ -2774,8 +3205,16 @@ channel_server(int sockfd, client_data* player)
 {
 	character_data characters[max_char_slots];
 	memset(characters, 0, sizeof(character_data));
-	u16 nchars = get_hardcoded_characters(characters);
-	(void)nchars;
+	get_hardcoded_characters(characters);
+
+	// ---
+	
+	character_data bot = characters[0];
+	bot.id = 2;
+	bot.face = 20000;
+	bot.hair = 30000;
+	memset(bot.cover_equips, 0, sizeof(bot.cover_equips));
+	strcpy(bot.name, "Slave");
 
 	// ---
 
@@ -2799,27 +3238,71 @@ channel_server(int sockfd, client_data* player)
 		u8* p = packet_buf;
 		u16 hdr = p_decode2(&p);
 
-		switch (hdr)
+		if (!player->in_game) 
 		{
-		case in_load_character:
-		{
+			if (hdr != in_player_load) {
+				// refuse every packet until the character is loaded
+				continue;
+			}
+
 			u32 char_id = p_decode4(&p);
-			if (char_id != player->char_id) {
+			if (char_id != player->char_id) 
+			{
 				prln("Dropped client that was trying to perform remote hack");
 				goto cleanup;
 			}
 
+			// TODO: grab correct char from list
 			connect_data(&con, player->channel, &characters[0]);
 
 			char* header = hardcoded_worlds[player->world].header;
 			if (strlen(header)) {
 				scrolling_header(&con, header);
 			}
+
+			player_spawn(&con, &bot);
+
+			player->in_game = 1;
+
+			continue;
+		}
+
+		switch (hdr)
+		{
+
+		case in_player_move:
+		{
+			/*u8 portal_count = */p_decode1(&p);
+			p_decode4(&p);
+
+			movement_data m[255];
+			u8 nmovements = movement_data_decode(&p, m);
+
+			show_moving(&con, bot.id, m, nmovements);
 			break;
 		}
 
 		// ---------------------------------------------------------------------
-		
+
+		case in_player_info:
+		{
+			// when a character is double clicked
+
+			p_decode4(&p); // tick count
+			u32 id = p_decode4(&p);
+			
+			if (id == bot.id) {
+				player_info(&con, &bot, 0);
+			} 
+			else if (id == player->char_id) {
+				// TODO: grab correct char from list
+				player_info(&con, &characters[0], 1);
+			}
+			else {
+				prln("Unknown char info requested");
+			}
+			break;
+		}	
 
 		}
 	}
