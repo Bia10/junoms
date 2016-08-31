@@ -17,8 +17,9 @@ Current status:
   and characters (and no character creation)
 * Equips are correctly displayed in character selection
 * Gets in-game and spawns in you in Henesys
+* Equips and inventory contents are correctly displayed in-game
 
-![](http://www.hnng.moe/f/Gdl)
+![](http://hnng.moe/f/GmU)
 
 Goal roadmap:
 * Implement most basic in-game functionality using the current hardcoded 
