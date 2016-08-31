@@ -21,6 +21,9 @@ Current status:
 
 ![](http://hnng.moe/f/GmU)
 
+* Implemented movement packets 
+[https://www.youtube.com/watch?v=dq9u9c4WoXM](-> video <-)
+
 Goal roadmap:
 * Implement most basic in-game functionality using the current hardcoded 
   accounts/character testbed
