@@ -2403,7 +2403,7 @@ typedef struct
 	char message[64];
 	u16 exp_percent;
 	u16 drop_percent;
-	char header[0x10000];
+	char header[2000];
 
 	u16 nchannels;
 	channel_data channels[max_channels];
@@ -2475,9 +2475,6 @@ char* hardcoded_user = "asdasd";
 
 global_var
 char* hardcoded_pass = "asdasd";
-
-global_var
-u64 hardcoded_ban_unix_time = 1474848000LL; // some time in 2017
 
 global_var
 u16 hardcoded_char_slots = 3;
@@ -2607,7 +2604,9 @@ login_server(int sockfd, client_data* player)
 					login_banned(
 						&con, 
 						(u32)reason, 
-						unix_to_filetime(hardcoded_ban_unix_time)
+						unix_to_filetime(
+							unix_now() + 2 * 365 * 24 * 60 * 60
+						)
 					);
 				}
 
@@ -2834,7 +2833,7 @@ cleanup:
 int
 main()
 {
-	prln("JunoMS pre-alpha v0.0.11");
+	prln("JunoMS pre-alpha v0.0.12");
 
 	client_data player;
 
