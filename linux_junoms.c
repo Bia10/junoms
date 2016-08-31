@@ -2227,6 +2227,7 @@ connect_data(connection* con, u8 channel_id, character_data* c)
 		p_encode1(&p, c->inv_capacity[i - 1]);
 	}
 
+	// equipped items
 	for (u8 i = equipped_slots - 1; i > 0; --i) 
 	{
 		item_data* item = &c->equips[i];
@@ -2240,7 +2241,6 @@ connect_data(connection* con, u8 channel_id, character_data* c)
 
 	p_encode1(&p, 0);
 
-	// equipped items
 	for (u8 i = equipped_slots - 1; i > 0; --i) 
 	{
 		item_data* item = &c->cover_equips[i];
