@@ -228,14 +228,24 @@ u8 ror(u8 v, u8 n) // 1kpp hype
 // 100-ns intervals between jan 1 1601 and jan 1 1970
 #define epoch_diff 116444736000000000LL
 
-u64
-unix_to_filetime(u64 unix_seconds) {
-	return epoch_diff + unix_seconds * 1000LL * 10000LL;
+inline u64
+unix_msec_to_filetime(u64 unix_mseconds) {
+	return epoch_diff + unix_mseconds * 10000LL;
 }
 
-u64
+inline u64
+unix_to_filetime(u64 unix_seconds) {
+	return unix_msec_to_filetime(unix_seconds * 1000LL);
+}
+
+inline u64
+filetime_to_unix_msec(u64 filetime) {
+	return (filetime - epoch_diff) / 10000LL;
+}
+
+inline u64
 filetime_to_unix(u64 filetime) {
-	return (filetime - epoch_diff) / (1000LL * 10000LL);
+	return filetime_to_unix_msec(filetime) / 1000LL;
 }
 
 #define clock_realtime 0
@@ -251,6 +261,17 @@ int
 clock_gettime(u32 clock_id, timespec* ts) {
 	return (int)(i64)syscall2(SYS_clock_gettime, (void*)(i64)clock_id, ts);
 }
+
+u64
+unix_now_msec()
+{
+	timespec ts = {0};
+	clock_gettime(clock_realtime, &ts);
+	return ts.sec * 1000 + ts.nsec / 1000000;
+}
+
+inline u64 unix_now() { return unix_now_msec() / 1000; }
+inline u64 filetime_now() { return unix_msec_to_filetime(unix_now_msec()); }
 
 // ---
 
@@ -1690,7 +1711,7 @@ all_chars_begin(u8 worldid, u8 nchars)
 
 #define invalid_id			((u32)-1)
 #define invalid_map			999999999
-#define item_no_expiration 	150842304000000000LL
+#define item_no_expiration 	3439756800LL
 
 #define max_ign_len			12
 #define max_char_slots		36
@@ -1845,7 +1866,7 @@ item_stats;
 
 typedef struct
 {
-	u64 id;
+	u64 id; // database id of the pet
 	char name[max_ign_len + 1];
 	u8 level;
 	u16 closeness;
@@ -1904,11 +1925,14 @@ item_data_encode(u8** p, item_data* item, i16 slot)
 		slot = abs(slot);
 
 		if (slot > 100) {
-			p_encode1(p, 0);
 			slot -= 100;
 		}
 
 		p_encode1(p, (u8)(i8)slot);
+	}
+
+	if (item->type == item_pet) {
+		return pet_data_encode(p, item);
 	}
 	
 	p_encode1(p, item->type);
@@ -2017,7 +2041,8 @@ char_data_encode_stats(u8** p, character_data* c)
 	p_encode4(p, c->face);
 	p_encode4(p, c->hair);
 
-	// TODO: pets
+	// TODO: summoned pet id's here
+	// (I suppose the client will then send a request to summon given pet id's?)
 	for (u8 i = 0; i < max_pets; ++i) {
 		p_encode8(p, 0);
 	}
@@ -2202,18 +2227,34 @@ connect_data(connection* con, u8 channel_id, character_data* c)
 		p_encode1(&p, c->inv_capacity[i - 1]);
 	}
 
-	// equipped items (sorted by slot)
-	for (u8 i = 0; i < equipped_slots; ++i) 
+	for (u8 i = equipped_slots - 1; i > 0; --i) 
 	{
 		item_data* item = &c->equips[i];
 		if (!item->type) {
 			continue;
 		}
 
+		// -50 to -1 (normal equips)
 		item_data_encode(&p, item, -(i16)i);
 	}
-	p_encode2(&p, 0);
 
+	p_encode1(&p, 0);
+
+	// equipped items
+	for (u8 i = equipped_slots - 1; i > 0; --i) 
+	{
+		item_data* item = &c->cover_equips[i];
+		if (!item->type) {
+			continue;
+		}
+
+		// -150 to -101 (cash / cover items)
+		item_data_encode(&p, item, -(i16)i - 100);
+	}
+
+	p_encode1(&p, 0);
+
+	// items
 	for (u8 inv = 0; inv < ninventories; ++inv) 
 	{
 		for (i16 i = 0; i < c->inv_capacity[inv]; ++i) 
@@ -2252,10 +2293,7 @@ connect_data(connection* con, u8 channel_id, character_data* c)
 	}
 
 	p_encode4(&p, 0);
-
-	timespec ts = {0};
-	clock_gettime(clock_realtime, &ts);
-	p_encode8(&p, unix_to_filetime(ts.sec * 1000 + ts.nsec / 1000000));
+	p_encode8(&p, filetime_now());
 
 	maple_write(con, packet_buf, p - packet_buf);
 }
@@ -2309,20 +2347,39 @@ get_hardcoded_characters(character_data* ch)
 
 	ch->meso = 123123123;
 
+	ch->cover_equips[equip_helm].expire_time = item_no_expiration;
+	ch->cover_equips[equip_helm].id = 1002193;
+	ch->cover_equips[equip_helm].type = item_equip;
+
+	ch->cover_equips[equip_top].expire_time = item_no_expiration;
+	ch->cover_equips[equip_top].id = 1052040;
+	ch->cover_equips[equip_top].type = item_equip;
+
+	ch->equips[equip_top].expire_time = item_no_expiration;
 	ch->equips[equip_top].id = 1040002;
 	ch->equips[equip_top].type = item_equip;
 
+	ch->equips[equip_bottom].expire_time = item_no_expiration;
 	ch->equips[equip_bottom].id = 1060006;
 	ch->equips[equip_bottom].type = item_equip;
 
+	ch->equips[equip_shoe].expire_time = item_no_expiration;
 	ch->equips[equip_shoe].id = 1072001;
 	ch->equips[equip_shoe].type = item_equip;
+	ch->equips[equip_shoe].as_equip.jump = 500;
+	ch->equips[equip_shoe].as_equip.speed = 500;
 
+	ch->equips[equip_weapon].expire_time = item_no_expiration;
 	ch->equips[equip_weapon].id = 1302000;
 	ch->equips[equip_weapon].type = item_equip;
 
+	ch->inventory[inv_equip - 1][0].expire_time = item_no_expiration;
 	ch->inventory[inv_equip - 1][0].id = 1302000;
 	ch->inventory[inv_equip - 1][0].type = item_equip;
+
+	ch->inventory[inv_cash - 1][0].expire_time = unix_now() + 90 * 24 * 60 * 60;
+	ch->inventory[inv_cash - 1][0].id = 5000000;
+	ch->inventory[inv_cash - 1][0].type = item_pet;
 
 	for (u8 i = 1; i <= ninventories; ++i) {
 		ch->inv_capacity[i - 1] = max_inv_slots;
@@ -2777,11 +2834,9 @@ cleanup:
 int
 main()
 {
-	prln("JunoMS pre-alpha v0.0.10");
+	prln("JunoMS pre-alpha v0.0.11");
 
 	client_data player;
-
-	// ---
 
 	nhardcoded_worlds = get_hardcoded_worlds(hardcoded_worlds);
 
@@ -2821,8 +2876,6 @@ main()
 
 		close(sockfd);
 	}
-
-	// ---
 
 	return 0;
 }
