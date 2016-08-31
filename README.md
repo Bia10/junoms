@@ -4,7 +4,7 @@ supports linux AMD64 only. Windows support is planned once the core features are
 in place.
 
 I have learned many things from developing 
-[https://github.com/Francesco149/kagami](kagami), and this project's current aim
+[kagami](https://github.com/Francesco149/kagami), and this project's current aim
 is matching kagami's current functionality with way smaller executable size, 
 no dependencies, no stdlib and proceed from there.
 
@@ -22,7 +22,7 @@ Current status:
 ![](http://hnng.moe/f/GmU)
 
 * Implemented movement packets 
-[https://www.youtube.com/watch?v=dq9u9c4WoXM](-> video <-)
+[->video<-](https://www.youtube.com/watch?v=dq9u9c4WoXM)
 
 Goal roadmap:
 * Implement most basic in-game functionality using the current hardcoded 
