@@ -16,6 +16,7 @@ typedef i32	b32;
 
 #define global_var static
 #define array_count(a) (sizeof(a) / sizeof((a)[0]))
+#define abs(v) ((v) < 0 ? -(v) : (v))
 
 // ---
 
@@ -225,7 +226,7 @@ u8 ror(u8 v, u8 n) // 1kpp hype
 }
 
 // 100-ns intervals between jan 1 1601 and jan 1 1970
-u64 epoch_diff = 116444736000000000LL;
+#define epoch_diff 116444736000000000LL
 
 u64
 unix_to_filetime(u64 unix_seconds) {
@@ -1685,12 +1686,23 @@ all_chars_begin(u8 worldid, u8 nchars)
 	return p;
 }
 
-typedef struct
-{
-	u32 id;
-	i16 slot;
-}
-equip_data;
+// ---
+
+#define invalid_id			((u32)-1)
+#define invalid_map			999999999
+#define item_no_expiration 	150842304000000000LL
+
+#define max_ign_len			12
+#define max_char_slots		36
+#define max_worlds			15
+#define max_channels		20
+#define min_inv_slots		24
+#define max_inv_slots		100
+#define min_storage_slots	4
+#define max_storage_slots	100
+#define max_pets			3
+#define max_vip_rock_maps	10
+#define max_rock_maps		5
 
 #define equipped_slots 51
 
@@ -1745,13 +1757,215 @@ equip_data;
 #define equip_medal					49
 #define equip_belt					50
 
+#define ninventories	5
+#define inv_equip		1
+#define inv_use			2
+#define inv_setup		3
+#define inv_etc			4
+#define inv_cash		5
+
+// item_category
+#define item_armor_helm			100
+#define item_armor_face			101
+#define item_armor_eye			102
+#define item_armor_earring		103
+#define item_armor_top			104
+#define item_armor_overall		105
+#define item_armor_bottom		106
+#define item_armor_shoe			107
+#define item_armor_glove		108
+#define item_armor_shield		109
+#define item_armor_cape			110
+#define item_armor_ring			111
+#define item_armor_pendant		112
+#define item_medal				114
+#define item_weapon_1h_sword	130
+#define item_weapon_1h_axe		131
+#define item_weapon_1h_mace		132
+#define item_weapon_dagger		133
+#define item_weapon_wand		137
+#define item_weapon_staff		138
+#define item_weapon_2h_sword	140
+#define item_weapon_2h_axe		141
+#define item_weapon_2h_mace		142
+#define item_weapon_spear		143
+#define item_weapon_polearm		144
+#define item_weapon_bow			145
+#define item_weapon_xbow		146
+#define item_weapon_claw		147
+#define item_weapon_knuckle		148
+#define item_weapon_gun			149
+#define item_mount				190
+#define item_arrow				206
+#define item_star				207
+#define item_bullet				233
+
+// item_data.type
+#define item_equip	1
+#define item_item	2
+#define item_pet	3
+
+// equip_stats.flags and item_stats.flags
+#define item_lock			0x0001
+#define item_spikes			0x0002
+#define item_cold_protect	0x0004
+#define item_untradeable	0x0008
+
+typedef struct
+{
+	char owner[max_ign_len + 1]; // owner string
+	u8 upgrade_slots;
+	u8 level;
+	u16 str;
+	u16 dex;
+	u16 intt;
+	u16 luk;
+	u16 hp;
+	u16 mp;
+	u16 watk;
+	u16 matk;
+	u16 wdef;
+	u16 mdef;
+	u16 acc;
+	u16 avoid;
+	u16 hands;
+	u16 speed;
+	u16 jump;
+	u16 flags;
+}
+equip_stats;
+
+typedef struct
+{
+	char maker[max_ign_len + 1]; // specially made by <ign>
+	u16 amount;
+	u16 flags;
+}
+item_stats;
+
+typedef struct
+{
+	u64 id;
+	char name[max_ign_len + 1];
+	u8 level;
+	u16 closeness;
+	u8 fullness;
+}
+pet_stats;
+
+// TODO: separate specialized values for pets, equips etc into other structs?
+typedef struct
+{
+	u32 id; 
+	u8 type; // equip, item or pet
+	u64 expire_time; // in unix seconds
+
+	// access the correct union member according to type unless you want
+	// the server to commit suicide by memory corruption
+	union 
+	{
+		equip_stats	as_equip;
+		item_stats	as_item;
+		pet_stats	as_pet;
+	};
+}
+item_data;
+
+inline u32 item_category(u32 id) { return id / 10000; }
+inline b32 item_is_rechargeable(u32 id) { 
+	return item_category(id) == item_bullet || item_category(id) == item_star; 
+}
+
+void
+pet_data_encode(u8** p, item_data* item)
+{
+	pet_stats* pet = &item->as_pet;
+
+	p_encode1(p, item->type);
+	p_encode4(p, item->id);
+	p_encode1(p, 1); // cash item = true
+	p_encode8(p, pet->id); // cash id
+	p_encode8(p, 0); // pretty sure this is a timestamp
+	p_append(p, pet->name, sizeof(pet->name));
+	p_encode1(p, pet->level);
+	p_encode2(p, pet->closeness);
+	p_encode1(p, pet->fullness);
+	p_encode8(p, unix_to_filetime(item->expire_time));
+	p_encode4(p, 0);
+	p_encode4(p, 0); // trial pet expire time?
+}
+
+void
+item_data_encode(u8** p, item_data* item, i16 slot)
+{
+	if (slot) 
+	{
+		// equipped items have negative slot
+		slot = abs(slot);
+
+		if (slot > 100) {
+			p_encode1(p, 0);
+			slot -= 100;
+		}
+
+		p_encode1(p, (u8)(i8)slot);
+	}
+	
+	p_encode1(p, item->type);
+	p_encode4(p, item->id);
+	p_encode1(p, 0); // not a cash item
+	p_encode8(p, unix_to_filetime(item->expire_time));
+
+	if (item->type == item_equip)
+	{
+		// equip
+		equip_stats* equip = &item->as_equip;
+
+		p_encode1(p, equip->upgrade_slots);
+		p_encode1(p, equip->level);
+		p_encode2(p, equip->str);
+		p_encode2(p, equip->dex);
+		p_encode2(p, equip->intt);
+		p_encode2(p, equip->luk);
+		p_encode2(p, equip->hp);
+		p_encode2(p, equip->mp);
+		p_encode2(p, equip->watk);
+		p_encode2(p, equip->matk);
+		p_encode2(p, equip->wdef);
+		p_encode2(p, equip->mdef);
+		p_encode2(p, equip->acc);
+		p_encode2(p, equip->avoid);
+		p_encode2(p, equip->hands);
+		p_encode2(p, equip->speed);
+		p_encode2(p, equip->jump);
+		p_encode_str(p, equip->owner);
+		p_encode2(p, equip->flags);
+		p_encode8(p, 0); // not sure what this is
+
+		return;
+	}
+
+	// regular item
+	item_stats* reg_item = &item->as_item;
+
+	p_encode2(p, reg_item->amount);
+	p_append(p, reg_item->maker, sizeof(reg_item->maker));
+	p_encode2(p, reg_item->flags);
+
+	if (item_is_rechargeable(item->id)) {
+		p_encode8(p, 0); // idk, could be some kind of id
+	}
+}
+
+// ---
+
 #define sex_otokonoko	0
 #define sex_onnanoko	1 // fucking weeb
 
 typedef struct
 {
 	u32 id;
-	char name[13];
+	char name[max_ign_len + 1];
 	u8 gender;
 	u8 skin;
 	u32 face;
@@ -1773,9 +1987,15 @@ typedef struct
 	u32 map;
 	u8 spawn;
 
-	// TODO: replace this with a full inventory
-	u8 nequips;
-	equip_data equips[equipped_slots];
+	// slots -1 to -51 translated to 0-50
+	item_data equips[equipped_slots];
+
+	// slots -101 to -151 translated to 0-50
+	item_data cover_equips[equipped_slots];
+
+	// inv number starts at zero, so subtract 1 from inv_equip, inv_use etc
+	u8 inv_capacity[ninventories];
+	item_data inventory[ninventories][max_inv_slots]; // slots start at zero
 
 	u32 world_rank;
 	i32 world_rank_move;
@@ -1790,15 +2010,18 @@ character_data;
 void
 char_data_encode_stats(u8** p, character_data* c)
 {
-	u8 huehue[24] = {0};
-
 	p_encode4(p, c->id);
 	p_append(p, c->name, sizeof(c->name));
 	p_encode1(p, c->gender);
 	p_encode1(p, c->skin);
 	p_encode4(p, c->face);
 	p_encode4(p, c->hair);
-	p_append(p, huehue, sizeof(huehue));
+
+	// TODO: pets
+	for (u8 i = 0; i < max_pets; ++i) {
+		p_encode8(p, 0);
+	}
+
 	p_encode1(p, c->level);
 	p_encode2(p, c->job);
 	p_encode2(p, c->str);
@@ -1828,83 +2051,70 @@ char_data_encode(u8** p, character_data* c)
 	p_encode1(p, c->gender);
 	p_encode1(p, c->skin);
 	p_encode4(p, c->face);
-	p_encode1(p, 0);
+	p_encode1(p, 0); // TODO: check this
 	p_encode4(p, c->hair);
 
-	// TODO: figure out how the fuck this works and rewrite it
-	u32 equips[equipped_slots][2];
-	memset(equips, 0, sizeof(equips));
+	// normal equip slots that are not covered by other items
+	b32 visible_slots[equipped_slots] = {0};
 
-	// index 0 is visible/covering equips?
-	// index 1 is normal/covered equips?
-
-	for (u8 i = 0; i < c->nequips; ++i)
-	{
-		equip_data* eq = &c->equips[i];
-
-		// -100 to -151 is normal/covered equips?
-		// 0 to 51 is cash/cover stuff?
-		i16 slot = -eq->slot;
-
-		if (slot > 100) {
-			slot -= 100;
-		}
-
-		if (equips[slot][0]) 
-		{
-			if (eq->slot < -100) 
-			{
-				// non-covering item?
-				equips[slot][1] = equips[slot][0];
-				equips[slot][0] = eq->id;
-			} else {
-				// covering item?
-				equips[slot][1] = eq->id;
-			}
-		}
-
-		else {
-			// no equip in this slot yet, just copy the id over
-			equips[slot][0] = eq->id;
-		}
-	}
-
-	// visible equips
+	// visible equips (cash and stuff that covers normal equips)
 	for (u8 i = 0; i < equipped_slots; ++i)
 	{
-		if (!equips[i][0]) {
+		if (!c->cover_equips[i].type && !c->equips[i].type) {
 			continue;
 		}
 
 		p_encode1(p, i);
 		
-		if (i == equip_weapon && equips[i][1]) {
-			p_encode4(p, equips[i][1]); // normal weapons always here
-		} else {
-			p_encode4(p, equips[i][0]);
+		if (i == equip_weapon && c->equips[i].type) {
+			// we want the non-cash weapon id here because cash weapon id is 
+			// added later on in the packet
+			p_encode4(p, c->equips[i].id);
+		} 
+		else 
+		{
+			if (c->cover_equips[i].type) {
+				// display the cover item
+				p_encode4(p, c->cover_equips[i].id);
+			}
+			else {
+				// no cover item, so make the base equip visible
+				p_encode4(p, c->equips[i].id);
+				visible_slots[i] = 1;
+			}
 		}
 	}
 
-	p_encode1(p, 0xFF);
+	p_encode1(p, 0xFF); // list terminator?
 
-	// covered equips
+	// covered equips (normal equips that have covering items over them)
 	for (u8 i = 0; i < equipped_slots; ++i)
 	{
-		if (equips[i][1] && i != equip_weapon)
-		{
-			p_encode1(p, i);
-			p_encode4(p, equips[i][1]);
+		if (!c->equips[i].type) {
+			continue;	
 		}
+		
+		if (i == equip_weapon) {
+			// cash weapon is after this item list
+			continue;
+		}
+
+		if (visible_slots[i]) {
+			continue;
+		}
+
+		p_encode1(p, i);
+		p_encode4(p, c->equips[i].id);
 	}
 
-	p_encode1(p, 0xFF);
-	p_encode4(p, equips[equip_weapon][0]);
+	p_encode1(p, 0xFF); // list terminator?
+	p_encode4(p, c->cover_equips[equip_weapon].id); // cash weapon
 
 	u8 ayylmao[12] = {0};
 	p_append(p, ayylmao, sizeof(ayylmao));
 
 	// rankings
-	p_encode1(p, 1);
+	p_encode1(p, 1); // enabled / disabled
 	p_encode4(p, c->world_rank);
 	p_encode4(p, (u32)c->world_rank_move);
 	p_encode4(p, c->job_rank);
@@ -1969,48 +2179,56 @@ connect_ip(connection* con, u8* ip, u16 port, u32 char_id)
 void
 connect_data(connection* con, u8 channel_id, character_data* c)
 {
+	u8* p = p_new(out_warp_to_map, packet_buf);
+	p_encode4(&p, (u32)channel_id); // why 4 bytes?
+	p_encode1(&p, 1); // portal counter (the one used in map rushers)
+	p_encode1(&p, 1); // flag that indicates that it's a connect packet
+	p_encode2(&p, 0); // apparently shows a message if nonzero
+
 	u8 rngseed[12];
 	if (getrandom(&rngseed, sizeof(rngseed), 0) != sizeof(rngseed)) {
 		prln("W: getrandom failed for rng seed");
 	}
-
-	u8* p = p_new(out_warp_to_map, packet_buf);
-	p_encode4(&p, (u32)channel_id); // why 4 bytes?
-	p_encode1(&p, 1);
-	p_encode1(&p, 1);
-	p_encode2(&p, 0);
-	p_append(&p, rngseed, sizeof(rngseed));
+	p_append(&p, rngseed, sizeof(rngseed)); // 3 u32 seeds
 
 	p_encode8(&p, (u64)-1);
-
 	char_data_encode_stats(&p, c);
-
 	p_encode1(&p, c->buddy_list_size);
+
 	p_encode4(&p, c->meso);
 	
-	// TODO: inventory
-	p_encode1(&p, 24);
-	p_encode1(&p, 24);
-	p_encode1(&p, 24);
-	p_encode1(&p, 24);
-	p_encode1(&p, 24);
+	// max slots for each inventory
+	for (u8 i = 1; i <= ninventories; ++i) {
+		p_encode1(&p, c->inv_capacity[i - 1]);
+	}
 
+	// equipped items (sorted by slot)
+	for (u8 i = 0; i < equipped_slots; ++i) 
+	{
+		item_data* item = &c->equips[i];
+		if (!item->type) {
+			continue;
+		}
+
+		item_data_encode(&p, item, -(i16)i);
+	}
 	p_encode2(&p, 0);
 
-	// equip
-	p_encode1(&p, 0);
-	
-	// use
-	p_encode1(&p, 0);
+	for (u8 inv = 0; inv < ninventories; ++inv) 
+	{
+		for (i16 i = 0; i < c->inv_capacity[inv]; ++i) 
+		{
+			item_data* item = &c->inventory[inv][i];
+			if (!item->type) {
+				continue;
+			}
 
-	// setup
-	p_encode1(&p, 0);
+			item_data_encode(&p, item, i + 1);
+			// slots in packets are 1-based, FUCK
+		}
 
-	// etc
-	p_encode1(&p, 0);
-
-	// cash
-	p_encode1(&p, 0);
+		p_encode1(&p, 0); // list terminator (zero slot)
+	}
 
 	p_encode2(&p, 0); // TODO: skills
 	p_encode2(&p, 0);
@@ -2018,20 +2236,26 @@ connect_data(connection* con, u8 channel_id, character_data* c)
 	p_encode2(&p, 0); // TODO: quest info
 	p_encode2(&p, 0);
 
-	p_encode8(&p, 0); 
-	
-	// TODO: rings
+	p_encode2(&p, 0); // minigame record list?
+	p_encode2(&p, 0); // crush ring record list?
+	p_encode2(&p, 0); // friendship ring record list?
+	p_encode2(&p, 0); // marriage ring record list?
 
-	u8 hentai[] = { 0xFF, 0xC9, 0x9A, 0x3B };
-	for (u8 i = 0; i < 15; ++i) {
-		p_append(&p, hentai, sizeof(hentai));
+	// teleport rock locations TODO
+	for (u8 i = 0; i < max_rock_maps; ++i) {
+		p_encode4(&p, invalid_map);
+	}
+
+	// vip teleport rock locations TODO
+	for (u8 i = 0; i < max_vip_rock_maps; ++i) {
+		p_encode4(&p, invalid_map);
 	}
 
 	p_encode4(&p, 0);
 
 	timespec ts = {0};
 	clock_gettime(clock_realtime, &ts);
-	p_encode8(&p, ts.sec * 1000 + ts.nsec / 1000000);
+	p_encode8(&p, unix_to_filetime(ts.sec * 1000 + ts.nsec / 1000000));
 
 	maple_write(con, packet_buf, p - packet_buf);
 }
@@ -2049,14 +2273,13 @@ scrolling_header(connection* con, char* header)
 {
 	u8* p = p_new(out_server_message, packet_buf);
 	p_encode1(&p, server_message_scrolling_hdr);
+	p_encode1(&p, 1);
 	p_encode_str(&p, header);
+
+	maple_write(con, packet_buf, p - packet_buf);
 }
 
 // ---
-
-#define max_char_slots	36
-#define max_worlds		15
-#define max_channels	20
 
 u16
 get_hardcoded_characters(character_data* ch)
@@ -2084,19 +2307,26 @@ get_hardcoded_characters(character_data* ch)
 	ch->job_rank = 1;
 	ch->job_rank_move = 0;
 
-	ch->nequips = 4;
+	ch->meso = 123123123;
 
-	ch->equips[0].slot = -equip_top;
-	ch->equips[0].id = 1040002;
+	ch->equips[equip_top].id = 1040002;
+	ch->equips[equip_top].type = item_equip;
 
-	ch->equips[1].slot = -equip_bottom;
-	ch->equips[1].id = 1060006;
+	ch->equips[equip_bottom].id = 1060006;
+	ch->equips[equip_bottom].type = item_equip;
 
-	ch->equips[2].slot = -equip_shoe;
-	ch->equips[2].id = 1072001;
+	ch->equips[equip_shoe].id = 1072001;
+	ch->equips[equip_shoe].type = item_equip;
 
-	ch->equips[3].slot = -equip_weapon;
-	ch->equips[3].id = 1302000;
+	ch->equips[equip_weapon].id = 1302000;
+	ch->equips[equip_weapon].type = item_equip;
+
+	ch->inventory[inv_equip - 1][0].id = 1302000;
+	ch->inventory[inv_equip - 1][0].type = item_equip;
+
+	for (u8 i = 1; i <= ninventories; ++i) {
+		ch->inv_capacity[i - 1] = max_inv_slots;
+	}
 
 	return nchars;
 }
@@ -2139,7 +2369,33 @@ get_hardcoded_worlds(world_data* w)
 	w->ribbon = ribbon_no;
 	w->exp_percent = 100;
 	w->drop_percent = 100;
-	strcpy(w->header, "VoHiYo");
+#if 0
+	strcpy(w->header, 
+		"What the fuck did you just fucking say about me, you little bitch? "
+		"I'll have you know I graduated top of my class in the Navy Seals, "
+		"and I've been involved in numerous secret raids on Al-Quaeda, and I "
+		"have over 300 confirmed kills. I am trained in gorilla warfare and "
+		"I'm the top sniper in the entire US armed forces. You are nothing to "
+		"me but just another target. I will wipe you the fuck out with "
+		"precision the likes of which has never been seen before on this "
+		"Earth, mark my fucking words. You think you can get away with saying "
+		"that shit to me over the Internet? Think again, fucker. As we speak "
+		"I am contacting my secret network of spies across the USA and your "
+		"IP is being traced right now so you better prepare for the storm, "
+		"maggot. The storm that wipes out the pathetic little thing you call "
+		"your life. You're fucking dead, kid. I can be anywhere, anytime, and "
+		"I can kill you in over seven hundred ways, and that's just with my "
+		"bare hands. Not only am I extensively trained in unarmed combat, but "
+		"I have access to the entire arsenal of the United States Marine Corps "
+		"and I will use it to its full extent to wipe your miserable ass off "
+		"the face of the continent, you little shit. If only you could have "
+		"known what unholy retribution your little \"clever\" comment was "
+		"about to bring down upon you, maybe you would have held your fucking "
+		"tongue. But you couldn't, you didn't, and now you're paying the "
+		"price, you goddamn idiot.");
+#else
+	strcpy(w->header, "install gentoo");
+#endif
 
 	w->nchannels = 2;
 
@@ -2376,18 +2632,6 @@ login_server(int sockfd, client_data* player)
 
 		case in_view_all_char:
 		{
-			u8 worldid = p_decode1(&p);
-			u8 channelid = p_decode1(&p);
-
-			if (worldid != player->world) 
-			{
-				prln("Dropping client for trying to "
-					 "select another world's chan");
-				goto cleanup;
-			}
-
-			player->channel = channelid;
-			
 			// note this should actually send the number of all chars in every
 			// world
 			all_chars_count(&con, nchars, nchars + 3 - nchars % 3);
@@ -2412,6 +2656,18 @@ login_server(int sockfd, client_data* player)
 
 		case in_charlist_request:
 		{
+			u8 worldid = p_decode1(&p);
+			u8 channelid = p_decode1(&p);
+
+			if (worldid != player->world) 
+			{
+				prln("Dropping client for trying to "
+					 "select another world's chan");
+				goto cleanup;
+			}
+
+			player->channel = channelid;
+
 			u8* p = world_chars_begin(nchars);
 
 			for (u16 i = 0; i < nchars; ++i) {
