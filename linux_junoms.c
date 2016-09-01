@@ -3286,7 +3286,7 @@ cleanup:
 int
 main()
 {
-	prln("JunoMS pre-alpha v0.0.12");
+	prln("JunoMS pre-alpha v0.0.13");
 
 	client_data player;
 
