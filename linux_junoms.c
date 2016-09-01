@@ -2031,6 +2031,10 @@ typedef struct
 
 	u8 buddy_list_size;
 	i32 meso;
+
+	u16 x, y;
+	u8 stance;
+	u16 foothold;
 }
 character_data;
 
@@ -2375,25 +2379,33 @@ player_spawn(connection* con, character_data* c)
 
 	p_encode2(&p, c->job);
 	char_data_encode_look(&p, c);
+	p_encode4(&p, 0);
+	p_encode4(&p, 0); // item effect TODO
+	p_encode4(&p, 0); // chair TODO
+	p_encode2(&p, c->x);
+	p_encode2(&p, c->y);
+	p_encode1(&p, c->stance);
+	p_encode2(&p, c->foothold);
+	p_encode1(&p, 0);
+
+	// TODO: summoned pets
+	p_encode1(&p, 0); // summoned pet list terminator
+
+	// TODO: mount info
+	p_encode4(&p, 0); // mount level
+	p_encode4(&p, 0); // mount exp
+	p_encode4(&p, 0); // mount tiredness
+
+	p_encode1(&p, 0); // player room TODO
+	p_encode1(&p, 0); // chalkboard TODO
 	
-	// --
-	
-	p_encode4(&p, 0);
-	p_encode4(&p, 0);
-	p_encode4(&p, 0);
-	
-	p_encode2(&p, 0); // x
-	p_encode2(&p, 0); // y
-	p_encode1(&p, 0); // stance
-	p_encode4(&p, 0);
-	p_encode4(&p, 1);
-	p_encode8(&p, 0);
+	p_encode1(&p, 0); // crush ring TODO
+	p_encode1(&p, 0); // friends ring TODO
+	p_encode1(&p, 0); // marriage ring TODO
 
 	p_encode1(&p, 0);
-	p_encode1(&p, 0); // chalkboard shit
-	p_encode4(&p, 0); // rings shit
-
-	// --
+	p_encode1(&p, 0);
+	p_encode1(&p, 0);
 
 	maple_write(con, packet_buf, p - packet_buf);
 }
@@ -2491,6 +2503,16 @@ typedef struct
 	};
 }
 movement_data;
+
+void
+movement_data_apply(movement_data* m, u8 nmovements, character_data* c)
+{
+	movement_data* last_mov = &m[nmovements - 1];
+	c->x = last_mov->x;
+	c->y = last_mov->y;
+	c->stance = last_mov->stance;
+	c->foothold = last_mov->foothold;
+}
 
 u8
 movement_data_decode(u8** p, movement_data* movements)
@@ -3179,6 +3201,7 @@ channel_server(int sockfd, client_data* player)
 
 	// ---
 	
+	b32 bot_spawned = 0;
 	character_data bot = characters[0];
 	bot.id = 2;
 	bot.face = 20000;
@@ -3230,8 +3253,6 @@ channel_server(int sockfd, client_data* player)
 				scrolling_header(&con, header);
 			}
 
-			player_spawn(&con, &bot);
-
 			player->in_game = 1;
 
 			continue;
@@ -3247,6 +3268,15 @@ channel_server(int sockfd, client_data* player)
 
 			movement_data m[255];
 			u8 nmovements = movement_data_decode(&p, m);
+
+			// TODO: grab correct char from list
+			movement_data_apply(m, nmovements, &characters[0]);
+			movement_data_apply(m, nmovements, &bot);
+
+			if (!bot_spawned) {
+				player_spawn(&con, &bot);
+				bot_spawned = 1;
+			}
 
 			show_moving(&con, bot.id, m, nmovements);
 			break;
@@ -3272,7 +3302,7 @@ channel_server(int sockfd, client_data* player)
 				prln("Unknown char info requested");
 			}
 			break;
-		}	
+		}
 
 		}
 	}
@@ -3286,7 +3316,7 @@ cleanup:
 int
 main()
 {
-	prln("JunoMS pre-alpha v0.0.13");
+	prln("JunoMS pre-alpha v0.0.14");
 
 	client_data player;
 
