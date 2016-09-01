@@ -1728,6 +1728,7 @@ all_chars_begin(u8 worldid, u8 nchars)
 #define max_rock_maps		5
 
 #define equipped_slots 51
+#define buff_bitmask_bytes 16
 
 #define equip_helm					1
 #define equip_face					2
@@ -2135,7 +2136,7 @@ char_data_encode_look(u8**p, character_data* c)
 	p_encode4(p, c->cover_equips[equip_weapon].id); // cash weapon
 
 	for (u8 i = 0; i < max_pets; ++i) {
-		p_encode4(p, 0); // TODO: encode pet id's
+		p_encode4(p, 0); // TODO: encode pet ITEM id's
 	}
 }
 
@@ -2362,48 +2363,17 @@ player_spawn(connection* con, character_data* c)
 	p_encode2(&p, 0); // guild logo
 	p_encode1(&p, 0); // guild logo color
 
-	// --
+	// TODO: map buffs
 
-	// TODO: buff map values
-	p_encode4(&p, 0);
-	p_encode4(&p, 1);
+	// this is a giant bitmask that contains which types of buffs are active
+	for (u8 i = 0; i < buff_bitmask_bytes; ++i) {
+		p_encode1(&p, 0);
+	}
+
 	p_encode1(&p, 0);
-	p_encode2(&p, 0);
-	p_encode1(&p, 0xF8);
-	p_encode8(&p, 0); // buff bitmask
+	p_encode1(&p, 0);
 
-	// this is bullshit from odin that will be removed
-	u32 rnd;
-	getrandom(&rnd, sizeof(u32), 0);
-
-	p_encode4(&p, 0);
-	p_encode2(&p, 0);
-	p_encode4(&p, rnd);
-	p_encode8(&p, 0);
-	p_encode2(&p, 0);
-	p_encode4(&p, rnd);
-	p_encode8(&p, 0);
-	p_encode2(&p, 0);
-	p_encode4(&p, rnd);
-	p_encode2(&p, 0);
-
-	// mount shit
-	p_encode4(&p, 0);
-	p_encode4(&p, 0);
-	p_encode4(&p, rnd);
-
-	p_encode8(&p, 0);
-	p_encode4(&p, rnd);
-	p_encode8(&p, 0);
-	p_encode4(&p, 0);
-	p_encode2(&p, 0);
-	p_encode4(&p, rnd);
-	p_encode4(&p, 0);
-	p_encode1(&p, 0x40);
-	p_encode1(&p, 1);
-	
-	// --
-
+	p_encode2(&p, c->job);
 	char_data_encode_look(&p, c);
 	
 	// --
