@@ -197,6 +197,16 @@ getrandom(void* buf, i64 nbytes, u32 flags)
 		);
 }
 
+i32
+rand()
+{
+	i32 res;
+	if (getrandom(&res, sizeof(i32), 0) != sizeof(i32)) {
+		prln("getrandom failed in rand()");
+	}
+	return res;
+}
+
 u8 rol(u8 v, u8 n)
 {
 	u8 msb;
@@ -2262,11 +2272,10 @@ char_send_connect_data(connection* con, character_data* c, u8 channel_id)
 	p_encode2(&p, 0);
 #endif
 
-	u8 rngseed[12];
-	if (getrandom(&rngseed, sizeof(rngseed), 0) != sizeof(rngseed)) {
-		prln("W: getrandom failed for rng seed");
-	}
-	p_append(&p, rngseed, sizeof(rngseed)); // 3 u32 seeds
+	// rng seeds
+	p_encode4(&p, (u32)rand());
+	p_encode4(&p, (u32)rand());
+	p_encode4(&p, (u32)rand());
 
 	p_encode8(&p, (u64)-1);
 	char_encode_stats(&p, c);
@@ -3335,6 +3344,8 @@ cleanup:
 	return retcode;
 }
 
+// -----------------------------------------------------------------------------
+
 int
 channel_server(int sockfd, client_data* client, world_data* world)
 {
@@ -3457,10 +3468,12 @@ cleanup:
 	return retcode;
 }
 
+// -----------------------------------------------------------------------------
+
 int
 main()
 {
-	prln("JunoMS pre-alpha v0.0.15");
+	prln("JunoMS pre-alpha v0.0.16");
 
 	client_data client;
 	world_data dst_world; // this would normally be obtained through interserv
