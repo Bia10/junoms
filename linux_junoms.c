@@ -3176,9 +3176,16 @@ login_server(int sockfd, client_data* client, world_data* dst_world)
 				1441134000LL // TODO
 			);
 			break;
+		}
 
 		// ---------------------------------------------------------------------
 
+		if (!client->logged_in) {
+			continue;
+		}
+
+		switch (hdr)
+		{
 		case in_after_login:
 			send_pin_operation(&con, pin_accepted); // FUCK pins
 			break;
