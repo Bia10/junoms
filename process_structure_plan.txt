@@ -1,0 +1,51 @@
+This is the plan for the server's final process/threading structure.
+
+Each element enclosed in [] square brackets is a SEPARATE PROCESS.
+
+[login server]             ,------[world 1, channel 1]
+      '------------[world 1]------[world 1, channel 2]
+	  '------------[world 2]------[world 2, channel 1]
+	                       '------[world 2, channel 2]
+
+- Each process only runs one thread.
+- Inter-process communication will be performed through sockets, which allows
+  each process to be on a different machine if necessary.
+- Inter-process connections are pinged so that if anything goes wrong, servers
+  can be marked as offline and the rest of the ecosystem will keep working.
+- There can be multiple loginservers to distribute load for extremely large 
+  servers.
+
+loginserver's main loop:
+- does non-blocking accepts for player connections
+- does non-blocking polls on all connected players' connections and handles 
+  packets when there's any (blocks until the packet is processed).
+- does non-blocking accepts for inter-server connections from worldservers
+- does non-blocking polls on all connected worldservers' connections and
+  handles inter-server packets.
+- keeps a local copy of each world's state through inter-server update packets
+  received from worldservers.
+
+worldserver's main loop:
+- does non-blocking accepts for inter-server channelserver connections.
+- does non-blocking connects to the loginserver and re-connects when the
+  connection is lost.
+- whenever a connection to the loginserver is established, the entire current
+  state of the worldserver is sent to the loginserver.
+- every time any change is made to the world state it is relayed to the login
+  server so that it can keep a copy of the world state without asking for
+  information every time it needs something. the same goes for channelserver.
+- keeps a local copy of each channel's state through inter-server update
+  packets received from channelservers.
+
+channelserver's main loop:
+- does non-blocking accepts for player connections.
+- does non-blocking polls on all connected players' connections and handles
+  game packets.
+- does non-blocking connects to the worldserver and re-connects when the
+  connection is lost.
+- whenever a connection to the worldserver is established, the entire current
+  state of the channelserver is sent to the worldserver.
+- every time any change is made to the channel state it is relayed to the
+  worldserver so it can keep a copy of the state without asking for
+  information every time.
+- keeps a local copy of the world's state.

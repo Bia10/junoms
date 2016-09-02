@@ -10,6 +10,8 @@ gcc 													\
 	-DJMS_DEBUG_RECV=1									\
 	-DJMS_DEBUG_ENCRYPTION=0							\
 	-DJMS_TCP_NODELAY=0									\
+	-DJMS_DRAW_DICK=0									\
+	-DJMS_NAVYSEALS=0									\
 	-o juno
 
 strip -R .eh_frame -R .eh_frame_hdr -R .comment juno

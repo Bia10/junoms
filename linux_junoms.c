@@ -18,7 +18,7 @@ typedef i32	b32;
 #define array_count(a) (sizeof(a) / sizeof((a)[0]))
 #define abs(v) ((v) < 0 ? -(v) : (v))
 
-// ---
+// -----------------------------------------------------------------------------
 
 #define stdout 1
 #define stderr 2
@@ -87,7 +87,7 @@ die(char* msg)
 	fprln(stderr, msg);
 }
 
-// ---
+// -----------------------------------------------------------------------------
 
 #define af_inet	2
 
@@ -183,7 +183,7 @@ tcp_force_flush(int sockfd, b32 enabled) {
 #endif
 }
 
-// ---
+// -----------------------------------------------------------------------------
 
 i64
 getrandom(void* buf, i64 nbytes, u32 flags)
@@ -273,7 +273,7 @@ unix_now_msec()
 inline u64 unix_now() { return unix_now_msec() / 1000; }
 inline u64 filetime_now() { return unix_msec_to_filetime(unix_now_msec()); }
 
-// ---
+// -----------------------------------------------------------------------------
 
 char 
 toupper(char c) {
@@ -512,7 +512,7 @@ char* strstr(char* haystack, char* needle)
 	return 0;
 }
 
-// ---
+// -----------------------------------------------------------------------------
 
 // all the aes stuff is heavily based on TitanMS
 // TODO: learn more about AES and clean up this code
@@ -862,7 +862,7 @@ aes_transform(u8* input, u8* output, u8* key, u8 key_size)
 	}
 }
 
-// ---
+// -----------------------------------------------------------------------------
 
 void
 maple_aes_ofb_transform(u8* buf, u8* iv, i64 nbytes)
@@ -1089,11 +1089,7 @@ maple_encrypted_hdr(u8* iv, u16 nbytes)
 	return (u32)lowpart | ((u32)hipart << 16);
 }
 
-// ---
-
-// used to build packets everywhere
-global_var
-u8 packet_buf[0x10000];
+// -----------------------------------------------------------------------------
 
 void
 p_encode2(u8** p, u16 v);
@@ -1190,7 +1186,7 @@ p_decode_str(u8** p, char* str) {
 	str[len] = 0;
 }
 
-// ---
+// -----------------------------------------------------------------------------
 
 global_var
 char fmtbuf[0x10000]; // used to format strings
@@ -1239,7 +1235,7 @@ void print_bytes_pre(char* prefix, u8* buf, u64 nbytes)
 #define dbg_recv_print_encrypted_packet(prefix, buf, nbytes)
 #endif
 
-// ---
+// -----------------------------------------------------------------------------
 
 int
 tcp_socket(u16 port)
@@ -1299,14 +1295,20 @@ maple_accept(int sockfd, connection* con)
 	}
 
 	// build handshake packet
-	u8* p = p_new(out_handshake, packet_buf);
+	u8 handshake[15];
+	u8* p = p_new(out_handshake, handshake);
 	p_encode4(&p, maple_version); // maple version
 	p_append(&p, con->iv_recv, 4); 
 	p_append(&p, con->iv_send, 4); 
 	p_encode1(&p, 8); // region
 
+	if (p - handshake > sizeof(handshake)) {
+		die("I'm retarded");
+		return -1;
+	}
+
 	tcp_force_flush(con->fd, 1);
-	if (write(con->fd, packet_buf, p - packet_buf) < 0) {
+	if (write(con->fd, handshake, p - handshake) < 0) {
 		die("Failed to send handshake packet");
 		return -1;
 	}
@@ -1314,7 +1316,7 @@ maple_accept(int sockfd, connection* con)
 
 #if JMS_DEBUG_SEND
 	puts("Sent handshake packet: ");
-	print_bytes(packet_buf, p - packet_buf);
+	print_bytes(handshake, p - handshake);
 	puts("\n");
 #endif
 
@@ -1350,10 +1352,11 @@ read_all(int fd, void* dst, u64 nbytes)
 	return nread;
 }
 
+// reads one entire maple packet
 // NOTE: packets can be up to 0xFFFF bytes large, so make sure dst has enough
 //       room.
 i64
-maple_read(connection* con, u8* dst)
+maple_recv(connection* con, u8* dst)
 {
 	i64 nread;
 	u32 encrypted_hdr;
@@ -1400,9 +1403,10 @@ maple_read(connection* con, u8* dst)
 	return nread;
 }
 
+// sends one entire maple packet
 // NOTE: this is ENCRYPTED send. to send unencrypted data, just use write.
 i64
-maple_write(connection* con, u8* packet, u16 nbytes)
+maple_send(connection* con, u8* packet, u16 nbytes)
 {
 	u32 encrypted_hdr = maple_encrypted_hdr(con->iv_send, nbytes);
 
@@ -1452,7 +1456,7 @@ maple_write(connection* con, u8* packet, u16 nbytes)
 	return res;
 }
 
-// ---
+// -----------------------------------------------------------------------------
 
 // common
 #define out_ping 0x0011
@@ -1503,36 +1507,50 @@ maple_write(connection* con, u8* packet, u16 nbytes)
 #define out_player_movement		0x008D
 #define out_player_spawn		0x0078
 
+// -----------------------------------------------------------------------------
+
+// used to build packets everywhere
+global_var
+u8 packet_buf[0x10000];
+
 void
-ping(connection* con)
+send_ping(connection* con)
 {
 	u8* p = p_new(out_ping, packet_buf);
-	maple_write(con, packet_buf, p - packet_buf);
+	maple_send(con, packet_buf, p - packet_buf);
 }
 
+// TODO: associate this func with some kind of account struct later on
 void
-auth_success_request_pin(connection* con, char* user)
+send_auth_success_request_pin(
+	connection* con, 
+	u32 account_id, 
+	u8 status, 
+	b32 is_admin, 
+	char* user, 
+	u64 creation_time)
 {
-	u8 tacos[] = {
-		0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 
-		0xFF, 0x6A, 0x01, 0x00, 
-		0x00, // player status (set gender, set pin)
-		0x00, // admin ? disables trading and enables gm commands if true
-		0x4E, // gm related flag, not sure
-	};
-
-	// ???
-	u8 pizza[] = {
-		0x03, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xDC, 
-		0x3D, 0x0B, 0x28, 0x64, 0xC5, 0x01, 0x08, 0x00, 0x00, 0x00, 
-	};
-
 	u8* p = p_new(out_login_status, packet_buf);
-	p_append(&p, tacos, sizeof(tacos));
+	p_encode2(&p, 0);
+	p_encode4(&p, 0);
+	p_encode4(&p, account_id);
+	p_encode1(&p, status);
+	p_encode1(&p, is_admin ? 1 : 0);
+	p_encode1(&p, is_admin ? 0x80 : 0); // TODO: check these two
+	//p_encode1(&p, gm_level > 0 ? 1 : 0);
 	p_encode_str(&p, user);
-	p_append(&p, pizza, sizeof(pizza));
+	p_encode1(&p, 0);
 
-	maple_write(con, packet_buf, p - packet_buf);
+	// TODO: quiet ban
+	p_encode1(&p, 0); // reason
+	p_encode8(&p, 0); // time
+
+	p_encode8(&p, unix_to_filetime(creation_time)); 
+	p_encode4(&p, 1); 
+	// non-zero hides "please select the world you would like to play in"
+	// not sure whether this packs more flags or not
+
+	maple_send(con, packet_buf, p - packet_buf);
 }
 
 #define login_id_deleted			3
@@ -1555,13 +1573,13 @@ auth_success_request_pin(connection* con, char* user)
 #define login_trial					27
 
 void
-login_failed(connection* con, u32 reason)
+send_login_failed(connection* con, u16 reason)
 {
 	u8* p = p_new(out_login_status, packet_buf);
-	p_encode4(&p, reason);
-	p_encode2(&p, 0);
+	p_encode2(&p, reason);
+	p_encode4(&p, 0);
 
-	maple_write(con, packet_buf, p - packet_buf);
+	maple_send(con, packet_buf, p - packet_buf);
 }
 
 #define ban_deleted				0
@@ -1581,17 +1599,15 @@ login_failed(connection* con, u32 reason)
 #define ban_null				14
 
 void
-login_banned(connection* con, u8 reason, u64 expire_filetime)
+send_login_banned(connection* con, u8 reason, u64 expire_filetime)
 {
-	u8 memes[5] = {0};
-
 	u8* p = p_new(out_login_status, packet_buf);
-	p_encode1(&p, 2);
-	p_append(&p, memes, 5);
+	p_encode2(&p, 2);
+	p_encode4(&p, 0);
 	p_encode1(&p, reason);
 	p_encode8(&p, expire_filetime);
 
-	maple_write(con, packet_buf, p - packet_buf);
+	maple_send(con, packet_buf, p - packet_buf);
 }
 
 #define pin_accepted	0
@@ -1601,18 +1617,20 @@ login_banned(connection* con, u8 reason, u64 expire_filetime)
 #define pin_enter		4
 
 void
-pin_operation(connection* con, u8 op)
+send_pin_operation(connection* con, u8 op)
 {
 	u8* p = p_new(out_pin_operation, packet_buf);
 	p_encode1(&p, op);
 
-	maple_write(con, packet_buf, p - packet_buf);
+	maple_send(con, packet_buf, p - packet_buf);
 }
 
 #define ribbon_no	0
 #define ribbon_e	1
 #define ribbon_n	2
 #define ribbon_h	3
+
+// TODO: associate these with the world_data struct?
 
 u8*
 world_entry_begin(
@@ -1638,7 +1656,7 @@ world_entry_begin(
 }
 
 void
-world_entry_append_channel(u8** p, u8 worldid, u8 id, char* name, u32 pop)
+world_entry_encode_channel(u8** p, u8 worldid, u8 id, char* name, u32 pop)
 {
 	p_encode_str(p, name);
 	p_encode4(p, pop);
@@ -1665,15 +1683,15 @@ world_entry_end(connection* con, u8* p, u16 nbubbles, world_bubble* bubbles)
 		p_encode_str(&p, bubbles[i].msg);
 	}
 
-	maple_write(con, packet_buf, p - packet_buf);
+	maple_send(con, packet_buf, p - packet_buf);
 }
 
 void
-world_list_end(connection* con)
+send_end_of_world_list(connection* con)
 {
 	u8* p = p_new(out_server_list, packet_buf);
 	p_encode1(&p, 0xFF);
-	maple_write(con, packet_buf, p - packet_buf);
+	maple_send(con, packet_buf, p - packet_buf);
 }
 
 #define server_normal	0
@@ -1681,21 +1699,21 @@ world_list_end(connection* con)
 #define server_full		2
 
 void
-server_status(connection* con, u16 status)
+send_server_status(connection* con, u16 status)
 {
 	u8* p = p_new(out_server_status, packet_buf);
 	p_encode2(&p, status);
-	maple_write(con, packet_buf, p - packet_buf);
+	maple_send(con, packet_buf, p - packet_buf);
 }
 
 void
-all_chars_count(connection* con, u32 nworlds, u32 last_visible_char_slot)
+send_all_chars_count(connection* con, u32 nworlds, u32 last_visible_char_slot)
 {
 	u8* p = p_new(out_all_char_list, packet_buf);
 	p_encode1(&p, 1);
 	p_encode4(&p, nworlds);
 	p_encode4(&p, last_visible_char_slot);
-	maple_write(con, packet_buf, p - packet_buf);
+	maple_send(con, packet_buf, p - packet_buf);
 }
 
 u8* 
@@ -1709,7 +1727,80 @@ all_chars_begin(u8 worldid, u8 nchars)
 	return p;
 }
 
-// ---
+void
+all_chars_end(connection* con, u8* p) {
+	maple_send(con, packet_buf, p - packet_buf);
+}
+
+void
+send_relog_response(connection* con) 
+{
+	u8* p = p_new(out_relog_response, packet_buf);
+	p_encode1(&p, 1);
+	maple_send(con, packet_buf, p - packet_buf);
+}
+
+u8*
+world_chars_begin(u8 nchars)
+{
+	u8* p = p_new(out_char_list, packet_buf);
+	p_encode1(&p, 0);
+	p_encode1(&p, nchars);
+	
+	return p;
+}
+
+void
+world_chars_end(connection* con, u8* p, u32 nmaxchars)
+{
+	p_encode4(&p, nmaxchars);
+	maple_send(con, packet_buf, p - packet_buf);
+}
+
+void
+send_char_name_response(connection* con, char* name, b32 used)
+{
+	u8* p = p_new(out_char_name_response, packet_buf);
+	p_encode_str(&p, name);
+	p_encode1(&p, used ? 1 : 0);
+
+	maple_send(con, packet_buf, p - packet_buf);
+}
+
+void
+send_connect_ip(connection* con, u8* ip, u16 port, u32 char_id)
+{
+	u8* p = p_new(out_server_ip, packet_buf);
+	p_encode2(&p, 0);
+	p_append(&p, ip, 4);
+	p_encode2(&p, port);
+	p_encode4(&p, char_id);
+	p_encode4(&p, 0);
+	p_encode1(&p, 0);
+	
+	maple_send(con, packet_buf, p - packet_buf);
+}
+
+#define server_message_notice			0
+#define server_message_popup			1
+#define server_message_mega				2
+#define server_message_smega			3
+#define server_message_scrolling_hdr	4
+#define server_message_pink_text		5
+#define server_message_light_blue_text	6
+
+void
+send_scrolling_header(connection* con, char* header)
+{
+	u8* p = p_new(out_server_message, packet_buf);
+	p_encode1(&p, server_message_scrolling_hdr);
+	p_encode1(&p, 1);
+	p_encode_str(&p, header);
+
+	maple_send(con, packet_buf, p - packet_buf);
+}
+
+// -----------------------------------------------------------------------------
 
 #define invalid_id			((u32)-1)
 #define invalid_map			999999999
@@ -1726,9 +1817,12 @@ all_chars_begin(u8 worldid, u8 nchars)
 #define max_pets			3
 #define max_vip_rock_maps	10
 #define max_rock_maps		5
+#define max_movement_data	0xff
 
 #define equipped_slots 51
 #define buff_bitmask_bytes 16
+
+// -----------------------------------------------------------------------------
 
 #define equip_helm					1
 #define equip_face					2
@@ -1837,49 +1931,6 @@ all_chars_begin(u8 worldid, u8 nchars)
 
 typedef struct
 {
-	char owner[max_ign_len + 1]; // owner string
-	u8 upgrade_slots;
-	u8 level;
-	u16 str;
-	u16 dex;
-	u16 intt;
-	u16 luk;
-	u16 hp;
-	u16 mp;
-	u16 watk;
-	u16 matk;
-	u16 wdef;
-	u16 mdef;
-	u16 acc;
-	u16 avoid;
-	u16 hands;
-	u16 speed;
-	u16 jump;
-	u16 flags;
-}
-equip_stats;
-
-typedef struct
-{
-	char maker[max_ign_len + 1]; // specially made by <ign>
-	u16 amount;
-	u16 flags;
-}
-item_stats;
-
-typedef struct
-{
-	u64 id; // database id of the pet
-	char name[max_ign_len + 1];
-	u8 level;
-	u16 closeness;
-	u8 fullness;
-}
-pet_stats;
-
-// TODO: separate specialized values for pets, equips etc into other structs?
-typedef struct
-{
 	u32 id; 
 	u8 type; // equip, item or pet
 	u64 expire_time; // in unix seconds
@@ -1888,39 +1939,76 @@ typedef struct
 	// the server to commit suicide by memory corruption
 	union 
 	{
-		equip_stats	as_equip;
-		item_stats	as_item;
-		pet_stats	as_pet;
+		struct
+		{
+			char maker[max_ign_len + 1]; // specially made by <ign>
+			u16 amount;
+			u16 flags;
+		}
+		as_item;
+
+		struct
+		{
+			char owner[max_ign_len + 1]; // owner string
+			u8 upgrade_slots;
+			u8 level;
+			u16 str;
+			u16 dex;
+			u16 intt;
+			u16 luk;
+			u16 hp;
+			u16 mp;
+			u16 watk;
+			u16 matk;
+			u16 wdef;
+			u16 mdef;
+			u16 acc;
+			u16 avoid;
+			u16 hands;
+			u16 speed;
+			u16 jump;
+			u16 flags;
+		}
+		as_equip;
+
+		struct
+		{
+			u64 id; // database id of the pet
+			char name[max_ign_len + 1];
+			u8 level;
+			u16 closeness;
+			u8 fullness;
+		}
+		as_pet;
 	};
 }
 item_data;
 
 inline u32 item_category(u32 id) { return id / 10000; }
+
 inline b32 item_is_rechargeable(u32 id) { 
 	return item_category(id) == item_bullet || item_category(id) == item_star; 
 }
 
 void
-pet_data_encode(u8** p, item_data* item)
+item_encode_as_pet(u8** p, item_data* item)
 {
-	pet_stats* pet = &item->as_pet;
-
 	p_encode1(p, item->type);
 	p_encode4(p, item->id);
 	p_encode1(p, 1); // cash item = true
-	p_encode8(p, pet->id); // cash id
+	p_encode8(p, item->as_pet.id); // cash id
 	p_encode8(p, 0); // pretty sure this is a timestamp
-	p_append(p, pet->name, sizeof(pet->name));
-	p_encode1(p, pet->level);
-	p_encode2(p, pet->closeness);
-	p_encode1(p, pet->fullness);
+	p_append(p, item->as_pet.name, sizeof(item->as_pet.name));
+	p_encode1(p, item->as_pet.level);
+	p_encode2(p, item->as_pet.closeness);
+	p_encode1(p, item->as_pet.fullness);
 	p_encode8(p, unix_to_filetime(item->expire_time));
 	p_encode4(p, 0);
 	p_encode4(p, 0); // trial pet expire time?
 }
 
 void
-item_data_encode(u8** p, item_data* item, i16 slot)
+item_encode(u8** p, item_data* item, i16 slot)
 {
 	if (slot) 
 	{
@@ -1935,7 +2023,7 @@ item_data_encode(u8** p, item_data* item, i16 slot)
 	}
 
 	if (item->type == item_pet) {
-		return pet_data_encode(p, item);
+		return item_encode_as_pet(p, item);
 	}
 	
 	p_encode1(p, item->type);
@@ -1946,45 +2034,41 @@ item_data_encode(u8** p, item_data* item, i16 slot)
 	if (item->type == item_equip)
 	{
 		// equip
-		equip_stats* equip = &item->as_equip;
-
-		p_encode1(p, equip->upgrade_slots);
-		p_encode1(p, equip->level);
-		p_encode2(p, equip->str);
-		p_encode2(p, equip->dex);
-		p_encode2(p, equip->intt);
-		p_encode2(p, equip->luk);
-		p_encode2(p, equip->hp);
-		p_encode2(p, equip->mp);
-		p_encode2(p, equip->watk);
-		p_encode2(p, equip->matk);
-		p_encode2(p, equip->wdef);
-		p_encode2(p, equip->mdef);
-		p_encode2(p, equip->acc);
-		p_encode2(p, equip->avoid);
-		p_encode2(p, equip->hands);
-		p_encode2(p, equip->speed);
-		p_encode2(p, equip->jump);
-		p_encode_str(p, equip->owner);
-		p_encode2(p, equip->flags);
+		p_encode1(p, item->as_equip.upgrade_slots);
+		p_encode1(p, item->as_equip.level);
+		p_encode2(p, item->as_equip.str);
+		p_encode2(p, item->as_equip.dex);
+		p_encode2(p, item->as_equip.intt);
+		p_encode2(p, item->as_equip.luk);
+		p_encode2(p, item->as_equip.hp);
+		p_encode2(p, item->as_equip.mp);
+		p_encode2(p, item->as_equip.watk);
+		p_encode2(p, item->as_equip.matk);
+		p_encode2(p, item->as_equip.wdef);
+		p_encode2(p, item->as_equip.mdef);
+		p_encode2(p, item->as_equip.acc);
+		p_encode2(p, item->as_equip.avoid);
+		p_encode2(p, item->as_equip.hands);
+		p_encode2(p, item->as_equip.speed);
+		p_encode2(p, item->as_equip.jump);
+		p_encode_str(p, item->as_equip.owner);
+		p_encode2(p, item->as_equip.flags);
 		p_encode8(p, 0); // not sure what this is
 
 		return;
 	}
 
 	// regular item
-	item_stats* reg_item = &item->as_item;
-
-	p_encode2(p, reg_item->amount);
-	p_append(p, reg_item->maker, sizeof(reg_item->maker));
-	p_encode2(p, reg_item->flags);
+	p_encode2(p, item->as_item.amount);
+	p_append(p, item->as_item.maker, sizeof(item->as_item.maker));
+	p_encode2(p, item->as_item.flags);
 
 	if (item_is_rechargeable(item->id)) {
 		p_encode8(p, 0); // idk, could be some kind of id
 	}
 }
 
-// ---
+// -----------------------------------------------------------------------------
 
 #define sex_otokonoko	0
 #define sex_onnanoko	1 // fucking weeb
@@ -2039,7 +2123,7 @@ typedef struct
 character_data;
 
 void
-char_data_encode_stats(u8** p, character_data* c)
+char_encode_stats(u8** p, character_data* c)
 {
 	p_encode4(p, c->id);
 	p_append(p, c->name, sizeof(c->name));
@@ -2075,7 +2159,7 @@ char_data_encode_stats(u8** p, character_data* c)
 }
 
 void
-char_data_encode_look(u8**p, character_data* c)
+char_encode_look(u8** p, character_data* c)
 {
 	p_encode1(p, c->gender);
 	p_encode1(p, c->skin);
@@ -2145,10 +2229,10 @@ char_data_encode_look(u8**p, character_data* c)
 }
 
 void
-char_data_encode(u8** p, character_data* c)
+char_encode(u8** p, character_data* c)
 {
-	char_data_encode_stats(p, c);
-	char_data_encode_look(p, c);
+	char_encode_stats(p, c);
+	char_encode_look(p, c);
 
 	// rankings
 	p_encode1(p, 1); // enabled / disabled
@@ -2159,62 +2243,7 @@ char_data_encode(u8** p, character_data* c)
 }
 
 void
-all_chars_end(connection* con, u8* p) {
-	maple_write(con, packet_buf, p - packet_buf);
-}
-
-void
-relog_response(connection* con) 
-{
-	u8* p = p_new(out_relog_response, packet_buf);
-	p_encode1(&p, 1);
-	maple_write(con, packet_buf, p - packet_buf);
-}
-
-u8*
-world_chars_begin(u8 nchars)
-{
-	u8* p = p_new(out_char_list, packet_buf);
-	p_encode1(&p, 0);
-	p_encode1(&p, nchars);
-	
-	return p;
-}
-
-void
-world_chars_end(connection* con, u8* p, u32 nmaxchars)
-{
-	p_encode4(&p, nmaxchars);
-	maple_write(con, packet_buf, p - packet_buf);
-}
-
-void
-char_name_response(connection* con, char* name, b32 used)
-{
-	u8* p = p_new(out_char_name_response, packet_buf);
-	p_encode_str(&p, name);
-	p_encode1(&p, used ? 1 : 0);
-
-	maple_write(con, packet_buf, p - packet_buf);
-}
-
-void
-connect_ip(connection* con, u8* ip, u16 port, u32 char_id)
-{
-	u8 meme[5] = {0};
-
-	u8* p = p_new(out_server_ip, packet_buf);
-	p_encode2(&p, 0);
-	p_append(&p, ip, 4);
-	p_encode2(&p, port);
-	p_encode4(&p, char_id);
-	p_append(&p, meme, sizeof(meme));
-	
-	maple_write(con, packet_buf, p - packet_buf);
-}
-
-void
-connect_data(connection* con, u8 channel_id, character_data* c)
+char_send_connect_data(connection* con, character_data* c, u8 channel_id)
 {
 	u8* p = p_new(out_map_change, packet_buf);
 	p_encode4(&p, (u32)channel_id); // why 4 bytes?
@@ -2240,7 +2269,7 @@ connect_data(connection* con, u8 channel_id, character_data* c)
 	p_append(&p, rngseed, sizeof(rngseed)); // 3 u32 seeds
 
 	p_encode8(&p, (u64)-1);
-	char_data_encode_stats(&p, c);
+	char_encode_stats(&p, c);
 	p_encode1(&p, c->buddy_list_size);
 
 	p_encode4(&p, c->meso);
@@ -2259,7 +2288,7 @@ connect_data(connection* con, u8 channel_id, character_data* c)
 		}
 
 		// -50 to -1 (normal equips)
-		item_data_encode(&p, item, -(i16)i);
+		item_encode(&p, item, -(i16)i);
 	}
 
 	p_encode1(&p, 0);
@@ -2272,7 +2301,7 @@ connect_data(connection* con, u8 channel_id, character_data* c)
 		}
 
 		// -150 to -101 (cash / cover items)
-		item_data_encode(&p, item, -(i16)i - 100);
+		item_encode(&p, item, -(i16)i - 100);
 	}
 
 	p_encode1(&p, 0);
@@ -2287,7 +2316,7 @@ connect_data(connection* con, u8 channel_id, character_data* c)
 				continue;
 			}
 
-			item_data_encode(&p, item, i + 1);
+			item_encode(&p, item, i + 1);
 			// slots in packets are 1-based, FUCK
 		}
 
@@ -2318,11 +2347,11 @@ connect_data(connection* con, u8 channel_id, character_data* c)
 	p_encode4(&p, 0);
 	p_encode8(&p, filetime_now());
 
-	maple_write(con, packet_buf, p - packet_buf);
+	maple_send(con, packet_buf, p - packet_buf);
 }
 
 void
-player_info(connection* con, character_data* c, b32 is_self)
+char_send_info(connection* con, character_data* c, b32 is_self)
 {
 	u8* p = p_new(out_player_info, packet_buf);
 	p_encode4(&p, c->id);
@@ -2351,11 +2380,11 @@ player_info(connection* con, character_data* c, b32 is_self)
 	p_encode4(&p, 0);
 	p_encode4(&p, 0);
 
-	maple_write(con, packet_buf, p - packet_buf);
+	maple_send(con, packet_buf, p - packet_buf);
 }
 
 void
-player_spawn(connection* con, character_data* c)
+char_send_spawn(connection* con, character_data* c)
 {
 	u8* p = p_new(out_player_spawn, packet_buf);
 	p_encode4(&p, c->id);
@@ -2378,7 +2407,7 @@ player_spawn(connection* con, character_data* c)
 	p_encode1(&p, 0);
 
 	p_encode2(&p, c->job);
-	char_data_encode_look(&p, c);
+	char_encode_look(&p, c);
 	p_encode4(&p, 0);
 	p_encode4(&p, 0); // item effect TODO
 	p_encode4(&p, 0); // chair TODO
@@ -2407,8 +2436,10 @@ player_spawn(connection* con, character_data* c)
 	p_encode1(&p, 0);
 	p_encode1(&p, 0);
 
-	maple_write(con, packet_buf, p - packet_buf);
+	maple_send(con, packet_buf, p - packet_buf);
 }
+
+// -----------------------------------------------------------------------------
 
 #define movement_normal1		0
 #define movement_jump			1
@@ -2505,7 +2536,7 @@ typedef struct
 movement_data;
 
 void
-movement_data_apply(movement_data* m, u8 nmovements, character_data* c)
+movement_apply(movement_data* m, u8 nmovements, character_data* c)
 {
 	movement_data* last_mov = &m[nmovements - 1];
 	c->x = last_mov->x;
@@ -2515,7 +2546,7 @@ movement_data_apply(movement_data* m, u8 nmovements, character_data* c)
 }
 
 u8
-movement_data_decode(u8** p, movement_data* movements)
+movement_decode(u8** p, movement_data* movements)
 {
 	u8 count = p_decode1(p);
 
@@ -2614,7 +2645,7 @@ movement_data_decode(u8** p, movement_data* movements)
 }
 
 void
-movement_data_encode(u8** p, movement_data* movements, u8 nmovements)
+movement_encode(u8** p, movement_data* movements, u8 nmovements)
 {
 	p_encode1(p, nmovements);
 
@@ -2710,41 +2741,55 @@ movement_data_encode(u8** p, movement_data* movements, u8 nmovements)
 }
 
 void
-show_moving(connection* con, u32 player_id, movement_data* m, u8 nmovements)
+movement_send(connection* con, movement_data* m, u8 nmovements, u32 player_id)
 {
 	u8* p = p_new(out_player_movement, packet_buf);
 	p_encode4(&p, player_id);
 	p_encode4(&p, 0);
-	movement_data_encode(&p, m, nmovements);
+	movement_encode(&p, m, nmovements);
 
-	maple_write(con, packet_buf, p - packet_buf);
+	maple_send(con, packet_buf, p - packet_buf);
 }
 
-#define server_message_notice			0
-#define server_message_popup			1
-#define server_message_mega				2
-#define server_message_smega			3
-#define server_message_scrolling_hdr	4
-#define server_message_pink_text		5
-#define server_message_light_blue_text	6
+// -----------------------------------------------------------------------------
+
+typedef struct
+{
+	char name[64];
+	u16 population;
+	u16 port;
+}
+channel_data;
+
+typedef struct
+{
+	char name[64];
+	u8 ribbon;
+	char message[64];
+	u16 exp_percent;
+	u16 drop_percent;
+	char header[2000];
+
+	u16 nchannels;
+	channel_data channels[max_channels];
+}
+world_data;
+
+// -----------------------------------------------------------------------------
+
+// this is all hardcoded stuff for testing purposes that will be removed once 
+// the server actually gets a database
+
+global_var
+u16 hardcoded_nchars = 1;
+
+global_var
+character_data hardcoded_chars[max_char_slots];
 
 void
-scrolling_header(connection* con, char* header)
+init_hardcoded_chars()
 {
-	u8* p = p_new(out_server_message, packet_buf);
-	p_encode1(&p, server_message_scrolling_hdr);
-	p_encode1(&p, 1);
-	p_encode_str(&p, header);
-
-	maple_write(con, packet_buf, p - packet_buf);
-}
-
-// ---
-
-u16
-get_hardcoded_characters(character_data* ch)
-{
-	u16 nchars = 1;
+	character_data* ch = hardcoded_chars;
 
 	strcpy(ch->name, "weebweeb");
 	ch->level = 200,
@@ -2806,49 +2851,26 @@ get_hardcoded_characters(character_data* ch)
 	for (u8 i = 1; i <= ninventories; ++i) {
 		ch->inv_capacity[i - 1] = max_inv_slots;
 	}
-
-	return nchars;
 }
-
-typedef struct
-{
-	char name[64];
-	u16 population;
-	u16 port;
-}
-channel_data;
-
-typedef struct
-{
-	char name[64];
-	u8 ribbon;
-	char message[64];
-	u16 exp_percent;
-	u16 drop_percent;
-	char header[2000];
-
-	u16 nchannels;
-	channel_data channels[max_channels];
-}
-world_data;
 
 global_var
-u8 nhardcoded_worlds;
+u8 hardcoded_nworlds = 1;
 
 global_var
 world_data hardcoded_worlds[max_worlds];
 
-u8
-get_hardcoded_worlds(world_data* w)
+void
+init_hardcoded_worlds()
 {
-	u8 nworlds = 1;
 	u16 baseport = 7200;
+
+	world_data* w = hardcoded_worlds;
 
 	strcpy(w->name, "Meme World 0");
 	w->ribbon = ribbon_no;
 	w->exp_percent = 100;
 	w->drop_percent = 100;
-#if 0
+#if JMS_NAVYSEALS
 	strcpy(w->header, 
 		"What the fuck did you just fucking say about me, you little bitch? "
 		"I'll have you know I graduated top of my class in the Navy Seals, "
@@ -2888,8 +2910,6 @@ get_hardcoded_worlds(world_data* w)
 	strcpy(c->name, "Meme World 0-2");
 	c->population = 0;
 	c->port = ++baseport;
-
-	return nworlds;
 }
 
 global_var
@@ -2899,9 +2919,94 @@ global_var
 char* hardcoded_pass = "asdasd";
 
 global_var
+u32 hardcoded_account_id = 1;
+
+global_var
 u16 hardcoded_char_slots = 3;
 
+// -----------------------------------------------------------------------------
+
+// these funcs temporarly get values from the hardcoded accounts and worlds, 
+// but they will shape the future api that gets stuff from the database
+
+u8
+get_worlds(world_data* worlds)
+{
+	// this will be removed and world data will be received from worldserver
+	for (u8 i = 0; i < hardcoded_nworlds; ++i) {
+		worlds[i] = hardcoded_worlds[i];
+	}
+
+	return hardcoded_nworlds;
+}
+
+u64
+account_by_user(char* user)
+{
+	if (streq(user, hardcoded_user)) {
+		return hardcoded_account_id;
+	}
+
+	return 0;
+}
+
+b32
+account_check_password(u32 account_id, char* password)
+{
+	if (account_id != hardcoded_account_id) {
+		prln("W: tried to check password of non-existing account");
+		return 0;
+	}
+
+	return streq(password, hardcoded_pass);
+}
+
+u16
+char_slots(u32 account_id)
+{
+	if (account_id != hardcoded_account_id) {
+		return 0;
+	}
+
+	return hardcoded_char_slots;
+}
+
+u16
+chars_by_world(u32 account_id, u8 world_id, character_data* chars)
+{
+	if (world_id != 0) {
+		return 0;
+	}
+
+	if (account_id != hardcoded_account_id) {
+		return 0;
+	}
+
+	if (chars) 
+	{
+		for (u16 i = 0; i < hardcoded_nchars; ++i) {
+			chars[i] = hardcoded_chars[i];
+		}
+	}
+
+	return hardcoded_nchars;
+}
+
+int
+char_by_id(u32 id, character_data* c)
+{
+	if (!id || id > hardcoded_nchars) {
+		return -1;
+	}
+
+	*c = hardcoded_chars[id - 1];
+	return 0;
+}
+
+// -----------------------------------------------------------------------------
+
 typedef struct {
+	u32 account_id;
 	char user[12];
 	b32 logged_in;
 	u8 world;
@@ -2913,21 +3018,18 @@ client_data;
 
 // NOTE: for testing purposes, the server currently only handle 1 player at once
 int
-login_server(int sockfd, client_data* player)
+login_server(int sockfd, client_data* client, world_data* dst_world)
 {
-	character_data characters[max_char_slots];
-	memset(characters, 0, sizeof(character_data));
-	u16 nchars = get_hardcoded_characters(characters);
-	
-	// ---
-
+#if JMS_DRAW_DICK
 	u16 cx1 = 40, cy1 = 300;
 	u16 cx2 = 40, cy2 = 190;
 	u16 my = cy2 + (cy1 - cy2) / 2;
+#endif
 
 	world_bubble bubbles[]  = {
 		{ 100, 100, "install gentoo" }, 
 
+#if JMS_DRAW_DICK
 		{ cx1 - 40, cy1, "@" }, 
 		{ cx1 - 25, cy1 + 30, "@" }, 
 		{ cx1 - 25, cy1 - 30, "@" }, 
@@ -2962,9 +3064,13 @@ login_server(int sockfd, client_data* player)
 		{ cx1 + 190, my + 30, "@" }, 
 		{ cx1 + 220, my - 10, "@" }, 
 		{ cx1 + 220, my + 10, "@" }, 
+#endif
 	};
 
 	// ---
+	
+	world_data worlds[max_worlds];
+	u8 nworlds = get_worlds(worlds);
 
 	int retcode = 0;
 
@@ -2977,7 +3083,7 @@ login_server(int sockfd, client_data* player)
 
 	while (1)
 	{
-		i64 nread = maple_read(&con, packet_buf);
+		i64 nread = maple_recv(&con, packet_buf);
 		retcode = nread < 0;
 		if (nread <= 0) {
 			goto cleanup;
@@ -2992,13 +3098,14 @@ login_server(int sockfd, client_data* player)
 			p_decode_str(&p, fmtbuf);
 
 			// ignore retarded long usernames
-			if (strlen(fmtbuf) > sizeof(player->user) - 1) 
+			if (strlen(fmtbuf) > sizeof(client->user) - 1) 
 			{
-				login_failed(&con, login_not_registered);
+				send_login_failed(&con, login_not_registered);
 				break;
 			}
 
-			if (!streq(fmtbuf, hardcoded_user)) 
+			client->account_id = account_by_user(fmtbuf);
+			if (!client->account_id)
 			{
 				char* p = fmtbuf;
 				for (; *p && *p < '0' && *p > '9'; ++p);
@@ -3008,11 +3115,11 @@ login_server(int sockfd, client_data* player)
 					u64 reason;
 
 					if (atoui(p, 10, &reason) < 0) {
-						login_failed(&con, login_not_registered);
+						send_login_failed(&con, login_not_registered);
 						break;
 					}
 					
-					login_failed(&con, (u32)reason);
+					send_login_failed(&con, (u32)reason);
 				}
 
 				if (strstr(fmtbuf, "ban") == fmtbuf) 
@@ -3020,11 +3127,11 @@ login_server(int sockfd, client_data* player)
 					u64 reason;
 
 					if (atoui(p, 10, &reason) < 0) {
-						login_failed(&con, login_not_registered);
+						send_login_failed(&con, login_not_registered);
 						break;
 					}
 					
-					login_banned(
+					send_login_banned(
 						&con, 
 						(u32)reason, 
 						unix_to_filetime(
@@ -3034,30 +3141,37 @@ login_server(int sockfd, client_data* player)
 				}
 
 				else {
-					login_failed(&con, login_not_registered);
+					send_login_failed(&con, login_not_registered);
 				}
 				
 				break;
 			}
 
-			strcpy(player->user, fmtbuf);
+			strcpy(client->user, fmtbuf);
 
 			// password
 			p_decode_str(&p, fmtbuf);
 
-			if (!streq(fmtbuf, hardcoded_pass)) {
-				login_failed(&con, login_incorrect_password);
+			if (!account_check_password(client->account_id, fmtbuf)) 
+			{
+				send_login_failed(&con, login_incorrect_password);
 				break;
 			}
 
-			player->logged_in = 1;
-			auth_success_request_pin(&con, player->user);
+			client->logged_in = 1;
+			send_auth_success_request_pin(
+				&con, 
+				client->account_id,
+				0, 0, // TODO
+				client->user, 
+				1441134000LL // TODO
+			);
 			break;
 
 		// ---------------------------------------------------------------------
 
 		case in_after_login:
-			pin_operation(&con, pin_accepted); // FUCK pins
+			send_pin_operation(&con, pin_accepted); // FUCK pins
 			break;
 
 		// ---------------------------------------------------------------------
@@ -3065,7 +3179,7 @@ login_server(int sockfd, client_data* player)
 		case in_server_list_request:
 		case in_server_list_rerequest: // why the fuck are there 2 hdrs for this
 		{
-			for (u8 i = 0; i < nhardcoded_worlds; ++i)
+			for (u8 i = 0; i < hardcoded_nworlds; ++i)
 			{
 				world_data* world = &hardcoded_worlds[i];
 				u8* p = world_entry_begin(
@@ -3081,7 +3195,7 @@ login_server(int sockfd, client_data* player)
 				for (u8 j = 0; j < world->nchannels; ++j)
 				{
 					channel_data* ch = &world->channels[j];
-					world_entry_append_channel(
+					world_entry_encode_channel(
 						&p, 
 						i, 
 						j, 
@@ -3093,7 +3207,7 @@ login_server(int sockfd, client_data* player)
 				world_entry_end(&con, p, array_count(bubbles), bubbles);
 			}
 
-			world_list_end(&con);
+			send_end_of_world_list(&con);
 			break;
 		}
 
@@ -3101,9 +3215,8 @@ login_server(int sockfd, client_data* player)
 
 		case in_server_status_request:
 		{
-			u8 worldid = p_decode1(&p);
-			player->world = worldid;
-			server_status(&con, server_normal);
+			client->world = p_decode1(&p);
+			send_server_status(&con, server_normal);
 			break;
 		}
 
@@ -3111,13 +3224,34 @@ login_server(int sockfd, client_data* player)
 
 		case in_view_all_char:
 		{
-			// note this should actually send the number of all chars in every
-			// world
-			all_chars_count(&con, nchars, nchars + 3 - nchars % 3);
-			u8* p = all_chars_begin(0, nchars);
+			u16 nall_chars = 0;
 
-			for (u16 i = 0; i < nchars; ++i) {
-				char_data_encode(&p, &characters[i]);
+			for (u8 i = 0; i < nworlds; ++i) {
+				nall_chars += 
+					chars_by_world(client->account_id, client->world, 0);
+			}
+
+			send_all_chars_count(
+				&con, 
+				nall_chars, 
+				nall_chars + 3 - nall_chars % 3
+			);
+
+			u8* p = all_chars_begin(0, nall_chars);
+
+			for (u8 i = 0; i < nworlds; ++i) 
+			{
+				character_data chars[max_char_slots];
+				u16 n = 
+					chars_by_world(
+						client->account_id, 
+						client->world, 
+						chars
+					);
+
+				for (u16 j = 0; j < n; ++j) {
+					char_encode(&p, &chars[i]);
+				}
 			}
 
 			all_chars_end(&con, p);
@@ -3128,7 +3262,7 @@ login_server(int sockfd, client_data* player)
 		// ---------------------------------------------------------------------
 
 		case in_relog:
-			relog_response(&con);
+			send_relog_response(&con);
 			break;
 
 		// ---------------------------------------------------------------------
@@ -3138,22 +3272,31 @@ login_server(int sockfd, client_data* player)
 			u8 worldid = p_decode1(&p);
 			u8 channelid = p_decode1(&p);
 
-			if (worldid != player->world) 
+			if (worldid != client->world) 
 			{
 				prln("Dropping client for trying to "
 					 "select another world's chan");
 				goto cleanup;
 			}
 
-			player->channel = channelid;
+			client->channel = channelid;
+			*dst_world = worlds[worldid];
+
+			character_data chars[max_char_slots];
+			u16 nchars = 
+				chars_by_world(
+					client->account_id, 
+					client->world, 
+					chars
+				);
 
 			u8* p = world_chars_begin(nchars);
 
 			for (u16 i = 0; i < nchars; ++i) {
-				char_data_encode(&p, &characters[i]);
+				char_encode(&p, &chars[i]);
 			}
 
-			world_chars_end(&con, p, hardcoded_char_slots);
+			world_chars_end(&con, p, char_slots(client->account_id));
 			break;
 		}
 
@@ -3161,14 +3304,14 @@ login_server(int sockfd, client_data* player)
 
 		case in_char_select:
 		{
-			player->char_id = p_decode4(&p);
+			client->char_id = p_decode4(&p);
 
 			u8 ip[4] = { 127, 0, 0, 1 };
-			connect_ip(
+			send_connect_ip(
 				&con, 
 				ip, 
-				hardcoded_worlds[player->world].channels[player->channel].port, 
-				player->char_id
+				worlds[client->world].channels[client->channel].port, 
+				client->char_id
 			);
 			break;
 		}
@@ -3177,7 +3320,7 @@ login_server(int sockfd, client_data* player)
 
 		case in_check_char_name:
 			p_decode_str(&p, fmtbuf);
-			char_name_response(&con, fmtbuf, 1);
+			send_char_name_response(&con, fmtbuf, 1);
 			// TODO: char creation
 			break;
 
@@ -3193,17 +3336,12 @@ cleanup:
 }
 
 int
-channel_server(int sockfd, client_data* player)
+channel_server(int sockfd, client_data* client, world_data* world)
 {
-	character_data characters[max_char_slots];
-	memset(characters, 0, sizeof(character_data));
-	get_hardcoded_characters(characters);
-
-	// ---
-	
 	b32 bot_spawned = 0;
-	character_data bot = characters[0];
-	bot.id = 2;
+
+	character_data bot = hardcoded_chars[0];
+	bot.id = client->char_id + 0x7fffffff;
 	bot.face = 20000;
 	bot.hair = 30000;
 	memset(bot.cover_equips, 0, sizeof(bot.cover_equips));
@@ -3220,9 +3358,17 @@ channel_server(int sockfd, client_data* player)
 		goto cleanup;
 	}
 
+	// TODO: character pool
+	character_data ch;
+	if (char_by_id(client->char_id, &ch) < 0) 
+	{
+		prln("Invalid character id after server transfer");
+		goto cleanup;
+	}
+
 	while (1)
 	{
-		i64 nread = maple_read(&con, packet_buf);
+		i64 nread = maple_recv(&con, packet_buf);
 		retcode = nread < 0;
 		if (nread <= 0) {
 			goto cleanup;
@@ -3231,7 +3377,7 @@ channel_server(int sockfd, client_data* player)
 		u8* p = packet_buf;
 		u16 hdr = p_decode2(&p);
 
-		if (!player->in_game) 
+		if (!client->in_game) 
 		{
 			if (hdr != in_player_load) {
 				// refuse every packet until the character is loaded
@@ -3239,21 +3385,20 @@ channel_server(int sockfd, client_data* player)
 			}
 
 			u32 char_id = p_decode4(&p);
-			if (char_id != player->char_id) 
+			if (char_id != client->char_id) 
 			{
 				prln("Dropped client that was trying to perform remote hack");
 				goto cleanup;
 			}
 
-			// TODO: grab correct char from list
-			connect_data(&con, player->channel, &characters[0]);
+			char_send_connect_data(&con, &ch, client->channel);
 
-			char* header = hardcoded_worlds[player->world].header;
+			char* header = world->header;
 			if (strlen(header)) {
-				scrolling_header(&con, header);
+				send_scrolling_header(&con, header);
 			}
 
-			player->in_game = 1;
+			client->in_game = 1;
 
 			continue;
 		}
@@ -3266,19 +3411,18 @@ channel_server(int sockfd, client_data* player)
 			/*u8 portal_count = */p_decode1(&p);
 			p_decode4(&p);
 
-			movement_data m[255];
-			u8 nmovements = movement_data_decode(&p, m);
+			movement_data m[max_movement_data];
+			u8 nmovements = movement_decode(&p, m);
 
-			// TODO: grab correct char from list
-			movement_data_apply(m, nmovements, &characters[0]);
-			movement_data_apply(m, nmovements, &bot);
+			movement_apply(m, nmovements, &ch);
+			movement_apply(m, nmovements, &bot);
 
 			if (!bot_spawned) {
-				player_spawn(&con, &bot);
+				char_send_spawn(&con, &bot);
 				bot_spawned = 1;
 			}
 
-			show_moving(&con, bot.id, m, nmovements);
+			movement_send(&con, m, nmovements, bot.id);
 			break;
 		}
 
@@ -3291,12 +3435,12 @@ channel_server(int sockfd, client_data* player)
 			p_decode4(&p); // tick count
 			u32 id = p_decode4(&p);
 			
+			// TODO: character pool
 			if (id == bot.id) {
-				player_info(&con, &bot, 0);
+				char_send_info(&con, &bot, 0);
 			} 
-			else if (id == player->char_id) {
-				// TODO: grab correct char from list
-				player_info(&con, &characters[0], 1);
+			else if (id == client->char_id) {
+				char_send_info(&con, &ch, 1);
 			}
 			else {
 				prln("Unknown char info requested");
@@ -3316,11 +3460,13 @@ cleanup:
 int
 main()
 {
-	prln("JunoMS pre-alpha v0.0.14");
+	prln("JunoMS pre-alpha v0.0.15");
 
-	client_data player;
+	client_data client;
+	world_data dst_world; // this would normally be obtained through interserv
 
-	nhardcoded_worlds = get_hardcoded_worlds(hardcoded_worlds);
+	init_hardcoded_worlds();
+	init_hardcoded_chars();
 
 	while (1)
 	{
@@ -3331,9 +3477,11 @@ main()
 			return 1;
 		}
 
-		while (!player.char_id || !player.logged_in) {
-			memset(&player, 0, sizeof(player));
-			if (login_server(sockfd, &player)) {
+		while (!client.account_id || !client.char_id || !client.logged_in) 
+		{
+			memset(&client, 0, sizeof(client));
+
+			if (login_server(sockfd, &client, &dst_world)) {
 				return 1;
 			}
 		}
@@ -3344,15 +3492,13 @@ main()
 
 		prln("# Channel Server");
 
-		sockfd = tcp_socket(
-				hardcoded_worlds[player.world]
-					.channels[player.channel].port);
+		sockfd = tcp_socket(dst_world.channels[client.channel].port);
 
 		if (sockfd < 0) {
 			return 1;
 		}
 
-		if (channel_server(sockfd, &player)) {
+		if (channel_server(sockfd, &client, &dst_world)) {
 			return 1;
 		}
 
