@@ -10,10 +10,13 @@
 */
 
 #define global_var static
+#define internal static
+
 #define array_count(a) (sizeof(a) / sizeof((a)[0]))
 #define abs(v) ((v) < 0 ? -(v) : (v))
 
 typedef i32 b32;
+typedef double f64;
 
 // -----------------------------------------------------------------------------
 
@@ -44,41 +47,52 @@ void* syscall5(
     void* arg4,
     void* arg5);
 
+/* TODO: actually implement this properly */
+i64 __divdi3(i64 a, i64 b)
+{
+    return (i64)((f64)a / b);
+}
+
+u64 __udivdi3(u64 a, u64 b)
+{
+    return (u64)((f64)a / b);
+}
+
 // -----------------------------------------------------------------------------
 
 #define stdout 1
 #define stderr 2
 
-i64
-write(int fd, void* data, i64 nbytes)
+internal
+intptr write(int fd, void const* data, intptr nbytes)
 {
-    return (i64)
+    return (intptr)
         syscall3(
             SYS_write,
-            (void*)(i64)fd,
+            (void*)(intptr)fd,
             (void*)data,
             (void*)nbytes
         );
 }
 
-i64
-read(int fd, void* data, i64 nbytes)
+internal
+intptr read(int fd, void* data, intptr nbytes)
 {
-    return (i64)
+    return (intptr)
         syscall3(
             SYS_read,
-            (void*)(i64)fd,
-            (void*)data,
+            (void*)(intptr)fd,
+            data,
             (void*)nbytes
         );
 }
 
-void
-close(int fd) {
-    syscall1(SYS_close, (void*)(i64)fd);
+internal
+void close(int fd) {
+    syscall1(SYS_close, (void*)(intptr)fd);
 }
 
-i64
+intptr
 strlen(char* str)
 {
     char* p;
@@ -86,22 +100,22 @@ strlen(char* str)
     return p - str;
 }
 
-i64
+intptr
 fprln(int fd, char* str) {
     return write(fd, str, strlen(str)) + write(fd, "\n", 1);
 }
 
-i64
+intptr
 fputs(int fd, char* str) {
     return write(fd, str, strlen(str));
 }
 
-i64
+intptr
 puts(char* str) {
     return fputs(stdout, str);
 }
 
-i64
+intptr
 prln(char* str) {
     return fprln(stdout, str);
 }
@@ -119,18 +133,6 @@ die(char* msg)
 
 #define sock_stream 1
 
-int
-socket(u16 family, i32 type, i32 protocol)
-{
-    return (int)(i64)
-        syscall3(
-            SYS_socket,
-            (void*)(i64)family,
-            (void*)(i64)type,
-            (void*)(i64)protocol
-        );
-}
-
 typedef struct
 {
     u16 family;
@@ -145,59 +147,147 @@ letobe16u(u16 v) {
     return (v << 8) | (v >> 8);
 }
 
-int
-bind(int sockfd, sockaddr_in* addr)
+#ifdef SYS_socketcall
+/* i386 multiplexes socket calls through socketcall */
+#define SYS_SOCKET      1
+#define SYS_BIND        2
+#define SYS_CONNECT     3
+#define SYS_LISTEN      4
+#define SYS_ACCEPT      5
+#define SYS_SHUTDOWN   13
+#define SYS_SETSOCKOPT 14
+
+internal
+int socketcall(u32 call, void* args)
 {
-    return (int)(i64)
+    return (int)(intptr)
+        syscall2(
+            SYS_socketcall,
+            (void*)(intptr)call,
+            args
+        );
+}
+#endif
+
+internal
+int socket(u16 family, i32 type, i32 protocol)
+{
+#ifndef SYS_socketcall
+    return (int)(intptr)
+        syscall3(
+            SYS_socket,
+            (void*)(intptr)family,
+            (void*)(intptr)type,
+            (void*)(intptr)protocol
+        );
+#else
+    void* args[3];
+    args[0] = (void*)(intptr)family;
+    args[1] = (void*)(intptr)type;
+    args[2] = (void*)(intptr)protocol;
+
+    return socketcall(SYS_SOCKET, args);
+#endif
+}
+
+internal
+int bind(int sockfd, sockaddr_in const* addr)
+{
+#ifndef SYS_socketcall
+    return (int)(intptr)
         syscall3(
             SYS_bind,
-            (void*)(i64)sockfd,
-            addr,
+            (void*)(intptr)sockfd,
+            (void*)addr,
             (void*)sizeof(sockaddr_in)
         );
+#else
+    void* args[3];
+    args[0] = (void*)(intptr)sockfd;
+    args[1] = (void*)addr;
+    args[2] = (void*)sizeof(sockaddr_in);
+
+    return socketcall(SYS_BIND, args);
+#endif
 }
 
-int
-listen(int sockfd, i64 backlog)
+internal
+int listen(int sockfd, int backlog)
 {
-    return (int)(i64)
+#ifndef SYS_socketcall
+    return (int)(intptr)
         syscall2(
             SYS_listen,
-            (void*)(i64)sockfd,
-            (void*)backlog
+            (void*)(intptr)sockfd,
+            (void*)(intptr)backlog
         );
+#else
+    void* args[2];
+    args[0] = (void*)(intptr)sockfd;
+    args[1] = (void*)(intptr)backlog;
+
+    return socketcall(SYS_LISTEN, args);
+#endif
 }
 
-int
-accept(int sockfd, sockaddr_in* addr)
+internal
+int accept(int sockfd, sockaddr_in const* addr)
 {
-    i64 addrlen = sizeof(sockaddr_in);
-    return (int)(i64)
+    int addrlen = sizeof(sockaddr_in);
+#ifndef SYS_socketcall
+    return (int)(intptr)
         syscall3(
             SYS_accept,
-            (void*)(i64)sockfd,
-            addr,
+            (void*)(intptr)sockfd,
+            (void*)addr,
             &addrlen
         );
+#else
+    void* args[3];
+    args[0] = (void*)(intptr)sockfd;
+    args[1] = (void*)addr;
+    args[2] = &addrlen;
+
+    return socketcall(SYS_ACCEPT, args);
+#endif
 }
+
 
 #define ipproto_tcp 6
 
 #define tcp_nodelay 1
 
-int
-setsockopt(int sockfd, i32 level, i32 optname, void* optval, u32 optlen)
+#if JMS_TCP_NODELAY
+internal
+int setsockopt(
+    int sockfd,
+    i32 level,
+    i32 optname,
+    void const* optval,
+    u32 optlen)
 {
-    return (int)(i64)
+#ifndef SYS_socketcall
+    return (int)(intptr)
         syscall5(
             SYS_setsockopt,
-            (void*)(i64)sockfd,
-            (void*)(i64)level,
-            (void*)(i64)optname,
-            optval,
-            (void*)(i64)optlen
+            (void*)(intptr)sockfd,
+            (void*)(intptr)level,
+            (void*)(intptr)optname,
+            (void*)optval,
+            (void*)(intptr)optlen
         );
+#else
+    void* args[5];
+    args[0] = (void*)(intptr)sockfd;
+    args[1] = (void*)(intptr)level;
+    args[2] = (void*)(intptr)optname;
+    args[3] = (void*)optval;
+    args[4] = (void*)(intptr)optlen;
+
+    return socketcall(SYS_SETSOCKOPT, args);
+#endif
 }
+#endif
 
 // forces a flush of the pending packets on the next send
 int
@@ -211,15 +301,15 @@ tcp_force_flush(int sockfd, b32 enabled) {
 
 // -----------------------------------------------------------------------------
 
-i64
-getrandom(void* buf, i64 nbytes, u32 flags)
+intptr
+getrandom(void* buf, intptr nbytes, u32 flags)
 {
-    return (i64)
+    return (intptr)
         syscall3(
             SYS_getrandom,
             buf,
             (void*)nbytes,
-            (void*)(i64)flags
+            (void*)(intptr)flags
         );
 }
 
@@ -295,7 +385,7 @@ timespec;
 
 int
 clock_gettime(u32 clock_id, timespec* ts) {
-    return (int)(i64)syscall2(SYS_clock_gettime, (void*)(i64)clock_id, ts);
+    return (int)(intptr)syscall2(SYS_clock_gettime, (void*)(intptr)clock_id, ts);
 }
 
 u64
@@ -329,8 +419,8 @@ strdo(char* str, char (* func)(char c))
     }
 }
 
-i64
-uitoa(u8 base, u64 val, char* buf, i64 width, char filler)
+intptr
+uitoa(u8 base, uintptr val, char* buf, intptr width, char filler)
 {
     if (!base) {
         return 0;
@@ -349,7 +439,7 @@ uitoa(u8 base, u64 val, char* buf, i64 width, char filler)
         *(p++) = filler;
     }
 
-    i64 res = p - buf;
+    intptr res = p - buf;
     *p-- = 0;
 
     char c;
@@ -364,8 +454,8 @@ uitoa(u8 base, u64 val, char* buf, i64 width, char filler)
     return res;
 }
 
-i64
-itoa(u8 base, i64 val, char* buf, i64 width, char filler)
+intptr
+itoa(u8 base, intptr val, char* buf, intptr width, char filler)
 {
     if (val < 0)
     {
@@ -373,7 +463,7 @@ itoa(u8 base, i64 val, char* buf, i64 width, char filler)
         val = -val;
     }
 
-    return uitoa(base, (u64)val, buf, width, filler);
+    return uitoa(base, (uintptr)val, buf, width, filler);
 }
 
 int
@@ -643,7 +733,7 @@ aes_rotate(u8* word)
 }
 
 void
-aes_core(u8* word, u64 iter)
+aes_core(u8* word, intptr iter)
 {
     aes_rotate(word);
 
@@ -656,10 +746,10 @@ aes_core(u8* word, u64 iter)
 }
 
 void
-aes_expand_key(u8* key, u8* expanded_key, u8 size, u64 expanded_size)
+aes_expand_key(u8* key, u8* expanded_key, u8 size, intptr expanded_size)
 {
-    u64 current_size = 0;
-    u64 rcon_iter = 1;
+    intptr current_size = 0;
+    intptr rcon_iter = 1;
 
     u8 tmp[4];
 
@@ -833,14 +923,14 @@ aes_create_round_key(u8* expanded_key, u8* round_key)
 }
 
 void
-aes_main(u8* state, u8* expanded_key, u64 nrounds)
+aes_main(u8* state, u8* expanded_key, intptr nrounds)
 {
     u8 round_key[16];
 
     aes_create_round_key(expanded_key, round_key);
     aes_add_round_key(state, round_key);
 
-    for (u64 i = 1; i < nrounds; ++i)
+    for (intptr i = 1; i < nrounds; ++i)
     {
         aes_create_round_key(expanded_key + i * 16, round_key);
         aes_round(state, round_key);
@@ -857,7 +947,7 @@ aes_transform(u8* input, u8* output, u8* key, u8 key_size)
 {
     u8 expanded_key[15 * 16];
 
-    u64 nrounds;
+    intptr nrounds;
     switch (key_size)
     {
     case 16:
@@ -874,7 +964,7 @@ aes_transform(u8* input, u8* output, u8* key, u8 key_size)
         return;
     }
 
-    u64 expanded_key_size = 16 * (nrounds + 1);
+    intptr expanded_key_size = 16 * (nrounds + 1);
     u8 block[16];
 
     // block is a column-major order 4x4 matrix, so we need to map our input to
@@ -901,7 +991,7 @@ aes_transform(u8* input, u8* output, u8* key, u8 key_size)
 // -----------------------------------------------------------------------------
 
 void
-maple_aes_ofb_transform(u8* buf, u8* iv, i64 nbytes)
+maple_aes_ofb_transform(u8* buf, u8* iv, intptr nbytes)
 {
     u8 aeskey[32] = {
         0x13, 0x00, 0x00, 0x00,
@@ -930,7 +1020,7 @@ maple_aes_ofb_transform(u8* buf, u8* iv, i64 nbytes)
         plaintext[i] = output[i] ^ buf[i];
     }
 
-    i64 chunks = nbytes / 16 + 1;
+    intptr chunks = nbytes / 16 + 1;
 
     if (chunks == 1)
     {
@@ -942,11 +1032,11 @@ maple_aes_ofb_transform(u8* buf, u8* iv, i64 nbytes)
     memcpy(input, output, 16);
 
     // all chunks except the last one
-    for (i64 i = 1; i < chunks - 1; ++i)
+    for (intptr i = 1; i < chunks - 1; ++i)
     {
         aes_transform(input, output, aeskey, 32);
 
-        i64 offset = i * 16;
+        intptr offset = i * 16;
 
         for (u8 j = 0; j < 16; ++j) {
             plaintext[j] = output[j] ^ buf[offset + j];
@@ -959,7 +1049,7 @@ maple_aes_ofb_transform(u8* buf, u8* iv, i64 nbytes)
     // last chunk
     aes_transform(input, output, aeskey, 32);
 
-    i64 offset = (chunks - 1) * 16;
+    intptr offset = (chunks - 1) * 16;
 
     for (u8 j = 0; j < 16; ++j) {
         plaintext[j] = output[j] ^ buf[offset + j];
@@ -1143,7 +1233,7 @@ p_encode1(u8** p, u8 v) {
 }
 
 void
-p_append(u8** p, void* buf, u64 nbytes)
+p_append(u8** p, void* buf, intptr nbytes)
 {
     memcpy(*p, buf, nbytes);
     *p += nbytes;
@@ -1182,7 +1272,7 @@ p_decode1(u8** p) {
 }
 
 void
-p_get_bytes(u8** p, void* dst, u64 nbytes)
+p_get_bytes(u8** p, void* dst, intptr nbytes)
 {
     memcpy(dst, *p, nbytes);
     *p += nbytes;
@@ -1227,18 +1317,18 @@ p_decode_str(u8** p, char* str) {
 global_var
 char fmtbuf[0x10000]; // used to format strings
 
-void print_bytes(u8* buf, u64 nbytes)
+void print_bytes(u8* buf, intptr nbytes)
 {
     for (u32 i = 0; i < nbytes; ++i)
     {
-        uitoa(16, (u64)buf[i], fmtbuf, 2, '0');
+        uitoa(16, (uintptr)buf[i], fmtbuf, 2, '0');
         strdo(fmtbuf, toupper);
         puts(fmtbuf);
         puts(" ");
     }
 }
 
-void print_bytes_pre(char* prefix, u8* buf, u64 nbytes)
+void print_bytes_pre(char* prefix, u8* buf, intptr nbytes)
 {
     puts("\n");
     puts(prefix);
@@ -1365,14 +1455,14 @@ maple_close(connection* con)
     close(con->fd);
 }
 
-i64
-read_all(int fd, void* dst, u64 nbytes)
+intptr
+read_all(int fd, void* dst, intptr nbytes)
 {
-    u64 nread = 0;
+    intptr nread = 0;
 
     while (nread < nbytes)
     {
-        i64 cb = read(fd, dst, nbytes);
+        intptr cb = read(fd, dst, nbytes);
         if (!cb) {
             prln("Client disconnected");
             return 0;
@@ -1391,10 +1481,10 @@ read_all(int fd, void* dst, u64 nbytes)
 // reads one entire maple packet
 // NOTE: packets can be up to 0xFFFF bytes large, so make sure dst has enough
 //       room.
-i64
+intptr
 maple_recv(connection* con, u8* dst)
 {
-    i64 nread;
+    intptr nread;
     u32 encrypted_hdr;
 
     // encrypted header
@@ -1416,7 +1506,7 @@ maple_recv(connection* con, u8* dst)
 
     puts(", packet length: ");
 
-    uitoa(10, (u64)packet_len, fmtbuf, 0, 0);
+    uitoa(10, (uintptr)packet_len, fmtbuf, 0, 0);
     prln(fmtbuf);
 #endif
 
@@ -1441,7 +1531,7 @@ maple_recv(connection* con, u8* dst)
 
 // sends one entire maple packet
 // NOTE: this is ENCRYPTED send. to send unencrypted data, just use write.
-i64
+intptr
 maple_send(connection* con, u8* packet, u16 nbytes)
 {
     u32 encrypted_hdr = maple_encrypted_hdr(con->iv_send, nbytes);
@@ -1465,7 +1555,7 @@ maple_send(connection* con, u8* packet, u16 nbytes)
     maple_encrypt(packet, nbytes);
     dbg_send_print_encrypted_packet("-> Maple Encrypted:", packet, nbytes);
 
-    u64 pos = 0, first = 1;
+    intptr pos = 0, first = 1;
     while (nbytes > pos) {
         // TODO: clean the first flag up
         if (nbytes > pos + 1460 - first * 4) {
@@ -1486,7 +1576,7 @@ maple_send(connection* con, u8* packet, u16 nbytes)
     maple_shuffle_iv(con->iv_send);
 
     tcp_force_flush(con->fd, 1);
-    i64 res = write(con->fd, packet, nbytes);
+    intptr res = write(con->fd, packet, nbytes);
     tcp_force_flush(con->fd, 0);
 
     return res;
@@ -2975,7 +3065,7 @@ get_worlds(world_data* worlds)
     return hardcoded_nworlds;
 }
 
-u64
+intptr
 account_by_user(char* user)
 {
     if (streq(user, hardcoded_user)) {
@@ -3118,7 +3208,7 @@ login_server(int sockfd, client_data* client, world_data* dst_world)
 
     while (1)
     {
-        i64 nread = maple_recv(&con, packet_buf);
+        intptr nread = maple_recv(&con, packet_buf);
         retcode = nread < 0;
         if (nread <= 0) {
             goto cleanup;
@@ -3412,7 +3502,7 @@ channel_server(int sockfd, client_data* client, world_data* world)
 
     while (1)
     {
-        i64 nread = maple_recv(&con, packet_buf);
+        intptr nread = maple_recv(&con, packet_buf);
         retcode = nread < 0;
         if (nread <= 0) {
             goto cleanup;
