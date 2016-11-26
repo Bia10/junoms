@@ -136,7 +136,7 @@ void die(char* msg)
 typedef struct
 {
     u16 family;
-    u16 port; // NOTE: this is big endian!!!!!!! use letobe16u
+    u16 port; /* NOTE: this is big endian!!!!!!! use letobe16u */
     u32 addr;
     u8  zero[8];
 }
@@ -469,7 +469,7 @@ intptr uitoa(
     char c;
     while (p > buf)
     {
-        // flip the string
+        /* flip the string */
         c = *p;
         *(p--) = *buf;
         *(buf++) = c;
@@ -946,15 +946,15 @@ void aes_mix_columns(u8* state)
 
     for (u8 i = 0; i < 4; ++i)
     {
-        // extract a column as an array
+        /* extract a column as an array */
         for (u8 j = 0; j < 4; ++j) {
             column[j] = state[j * 4 + i];
         }
 
-        // mix it
+        /* mix it */
         aes_mix_column(column);
 
-        // put it back in the matrix
+        /* put it back in the matrix */
         for (u8 j = 0; j < 4; ++j) {
             state[j * 4 + i] = column[j];
         }
@@ -1073,7 +1073,7 @@ void maple_aes_ofb_transform(u8* buf, u8* iv, intptr nbytes)
         expanded_dong_i_mean_iv[i] = iv[i%4];
     }
 
-    // first iteration (initializes input)
+    /* first iteration (initializes input) */
     aes_transform(expanded_dong_i_mean_iv, output, aeskey, 32);
 
     for (u8 i = 0; i < 16; ++i) {
@@ -1091,7 +1091,7 @@ void maple_aes_ofb_transform(u8* buf, u8* iv, intptr nbytes)
     memecpy(buf, plaintext, 16);
     memecpy(input, output, 16);
 
-    // all chunks except the last one
+    /* all chunks except the last one */
     for (intptr i = 1; i < chunks - 1; ++i)
     {
         aes_transform(input, output, aeskey, 32);
@@ -1106,7 +1106,7 @@ void maple_aes_ofb_transform(u8* buf, u8* iv, intptr nbytes)
         memecpy(input, output, 16);
     }
 
-    // last chunk
+    /* last chunk */
     aes_transform(input, output, aeskey, 32);
 
     intptr offset = (chunks - 1) * 16;
@@ -1497,10 +1497,10 @@ int maple_accept(int sockfd, connection* con)
     /* build handshake packet */
     u8 handshake[15];
     u8* p = p_new(OUT_HANDSHAKE, handshake);
-    p_encode4(&p, MAPLE_VERSION); // maple version
+    p_encode4(&p, MAPLE_VERSION); /* maple version */
     p_append(&p, con->iv_recv, 4);
     p_append(&p, con->iv_send, 4);
-    p_encode1(&p, 8); // region
+    p_encode1(&p, 8); /* region */
 
     if (p - handshake > sizeof(handshake))
     {
@@ -1782,8 +1782,8 @@ void send_auth_success_request_pin(
     p_encode1(&p, 0);
 
     /* TODO: quiet ban */
-    p_encode1(&p, 0); // reason
-    p_encode8(&p, 0); // time
+    p_encode1(&p, 0); /* reason */
+    p_encode8(&p, 0); /* time */
 
     p_encode8(&p, unix_to_filetime(creation_time));
     p_encode4(&p, 1);
@@ -2462,7 +2462,7 @@ void char_encode_look(u8** p, character_data* c)
                 p_encode4(p, c->cover_equips[i].id);
             }
             else {
-                // no cover item, so make the base equip visible
+                /* no cover item, so make the base equip visible */
                 p_encode4(p, c->equips[i].id);
                 visible_slots[i] = 1;
             }
@@ -2507,8 +2507,8 @@ void char_encode(u8** p, character_data* c)
     char_encode_stats(p, c);
     char_encode_look(p, c);
 
-    // rankings
-    p_encode1(p, 1); // enabled / disabled
+    /* rankings */
+    p_encode1(p, 1); /* enabled / disabled */
     p_encode4(p, c->world_rank);
     p_encode4(p, (u32)c->world_rank_move);
     p_encode4(p, c->job_rank);
@@ -3785,7 +3785,7 @@ int channel_server(
             {
                 /* when a character is double clicked */
 
-                p_decode4(&p); // tick count
+                p_decode4(&p); /* tick count */
                 u32 id = p_decode4(&p);
 
                 /* TODO: character pool */
