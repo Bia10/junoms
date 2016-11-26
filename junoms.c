@@ -569,59 +569,76 @@ int atoi(char* str, u8 base, i64* res)
 #endif
 
 internal
-void memcpy(void* dst, void* src, i64 nbytes)
+void memecpy(void* dst, void* src, intptr nbytes)
 {
-    i64 i = 0;
+    intptr i;
 
-    if (nbytes % sizeof(u64) == 0)
+    if (nbytes / sizeof(intptr))
     {
-        u64* dst_chunks = (u64*)dst;
-        u64* src_chunks = (u64*)src;
+        intptr* dst_chunks = (intptr*)dst;
+        intptr* src_chunks = (intptr*)src;
 
-        for (; i < nbytes / sizeof(u64); ++i) {
+        for (i = 0; i < nbytes / sizeof(intptr); ++i) {
             dst_chunks[i] = src_chunks[i];
         }
-    }
-    else
-    {
-        u8* dst_bytes = (u8*)dst;
-        u8* src_bytes = (u8*)src;
 
-        for (; i < nbytes; ++i) {
-            dst_bytes[i] = src_bytes[i];
-        }
+        nbytes %= sizeof(intptr);
+        dst = &dst_chunks[i];
+        src = &src_chunks[i];
+    }
+
+    u8* dst_bytes = (u8*)dst;
+    u8* src_bytes = (u8*)src;
+
+    for (i = 0; i < nbytes; ++i) {
+        dst_bytes[i] = src_bytes[i];
     }
 }
 
-internal
-void memset(void* dst, u8 value, i64 nbytes)
+void memcpy(void* dst, void* src, intptr nbytes)
 {
-    i64 i = 0;
+    /* on struct assignments, gcc automatically generates calls
+       to memcpy. the function must be nonstatic for some reason */
+    return memecpy(dst, src, nbytes);
+}
 
-    if (nbytes % sizeof(u64) == 0)
+internal
+void memeset(void* dst, u8 value, intptr nbytes)
+{
+    intptr i;
+
+    if (nbytes / sizeof(intptr))
     {
-        u64* dst_chunks = (u64*)dst;
-        u64 chunk =
-            (u64)value | (u64)(value << 8) |
-            (u64)(value << 16) | (u64)(value << 24);
+        intptr* dst_chunks = (intptr*)dst;
+        intptr chunk;
+        u8* raw_chunk = (u8*)&chunk;
 
-        for (; i < nbytes / sizeof(u64); ++i) {
+        for (i = 0; i < sizeof(intptr); ++i) {
+            raw_chunk[i] = value;
+        }
+
+        for (i = 0; i < nbytes / sizeof(intptr); ++i) {
             dst_chunks[i] = chunk;
         }
-    }
-    else
-    {
-        u8* dst_bytes = (u8*)dst;
 
-        for (; i < nbytes; ++i) {
-            dst_bytes[i] = value;
-        }
+        nbytes %= sizeof(intptr);
+        dst = &dst_chunks[i];
+    }
+
+    u8* dst_bytes = (u8*)dst;
+
+    for (i = 0; i < nbytes; ++i) {
+        dst_bytes[i] = value;
     }
 }
 
 internal
-void strcpy(char* dst, char* src) {
-    memcpy((u8*)dst, (u8*)src, strlen(src) + 1);
+intptr strcpy(char* dst, char* src)
+{
+    intptr len = strlen(src);
+    memecpy(dst, src, len);
+    dst[len] = 0;
+    return len;
 }
 
 internal
@@ -638,9 +655,9 @@ b32 streq(char* a, char* b)
 }
 
 internal
-b32 strneq(char* a, char* b, i64 len)
+b32 strneq(char* a, char* b, intptr len)
 {
-    i64 i;
+    intptr i;
 
     for (i = 0; i < len && a[i] && b[i]; ++i)
     {
@@ -659,7 +676,7 @@ b32 strneq(char* a, char* b, i64 len)
 internal
 char* strstr(char* haystack, char* needle)
 {
-    i64 len = strlen(needle);
+    intptr len = strlen(needle);
 
     for(; *haystack; ++haystack)
     {
@@ -765,7 +782,7 @@ internal
 void aes_rotate(u8* word)
 {
     u8 tmp = word[0];
-    memcpy(word, word + 1, 3);
+    memecpy(word, word + 1, 3);
     word[3] = tmp;
 }
 
@@ -795,13 +812,13 @@ void aes_expand_key(
     u8 tmp[4];
 
     /* first bytes are just the initial key */
-    memcpy(expanded_key, key, size);
+    memecpy(expanded_key, key, size);
     current_size += size;
 
     while (current_size < expanded_size)
     {
         /* save previous 4 bytes to a tmp buffer */
-        memcpy(tmp, expanded_key + current_size - 4, 4);
+        memecpy(tmp, expanded_key + current_size - 4, 4);
 
         /* apply the core schedule to tmp every keysize bytes
            and increment rcon iteration */
@@ -849,7 +866,7 @@ void aes_shift_row(u8* state, u8 n)
     for (u8 i = 0; i < n; ++i)
     {
         tmp = state[0];
-        memcpy(state, state + 1, 3);
+        memecpy(state, state + 1, 3);
         state[3] = tmp;
     }
 }
@@ -899,7 +916,7 @@ internal
 void aes_mix_column(u8* col)
 {
     u8 cpy[4];
-    memcpy(cpy, col, 4);
+    memecpy(cpy, col, 4);
 
     col[0] =    galois_multiplication(cpy[0], 2) ^
                 galois_multiplication(cpy[3], 1) ^
@@ -1067,12 +1084,12 @@ void maple_aes_ofb_transform(u8* buf, u8* iv, intptr nbytes)
 
     if (chunks == 1)
     {
-        memcpy(buf, plaintext, nbytes);
+        memecpy(buf, plaintext, nbytes);
         return;
     }
 
-    memcpy(buf, plaintext, 16);
-    memcpy(input, output, 16);
+    memecpy(buf, plaintext, 16);
+    memecpy(input, output, 16);
 
     // all chunks except the last one
     for (intptr i = 1; i < chunks - 1; ++i)
@@ -1085,8 +1102,8 @@ void maple_aes_ofb_transform(u8* buf, u8* iv, intptr nbytes)
             plaintext[j] = output[j] ^ buf[offset + j];
         }
 
-        memcpy(buf + offset, plaintext, 16);
-        memcpy(input, output, 16);
+        memecpy(buf + offset, plaintext, 16);
+        memecpy(input, output, 16);
     }
 
     // last chunk
@@ -1098,8 +1115,8 @@ void maple_aes_ofb_transform(u8* buf, u8* iv, intptr nbytes)
         plaintext[j] = output[j] ^ buf[offset + j];
     }
 
-    memcpy(buf + offset, plaintext, nbytes % 16);
-    memcpy(input, output, 16);
+    memecpy(buf + offset, plaintext, nbytes % 16);
+    memecpy(input, output, 16);
 }
 
 /* lol idk some fucked up key routine used to shuffle the iv */
@@ -1155,7 +1172,7 @@ void maple_shuffle_iv(u8* iv)
         *new_iv_u32 = shift;
     }
 
-    memcpy(iv, new_iv, 4);
+    memecpy(iv, new_iv, 4);
 }
 
 internal
@@ -1275,7 +1292,7 @@ void p_encode1(u8** p, u8 v) {
 internal
 void p_append(u8** p, void* buf, intptr nbytes)
 {
-    memcpy(*p, buf, nbytes);
+    memecpy(*p, buf, nbytes);
     *p += nbytes;
 }
 
@@ -1322,7 +1339,7 @@ u8 p_decode1(u8** p) {
 internal
 void p_get_bytes(u8** p, void* dst, intptr nbytes)
 {
-    memcpy(dst, *p, nbytes);
+    memecpy(dst, *p, nbytes);
     *p += nbytes;
 }
 
@@ -3066,6 +3083,7 @@ internal
 void init_hardcoded_chars()
 {
     character_data* ch = hardcoded_chars;
+    memeset(ch, 0, sizeof(hardcoded_chars));
 
     strcpy(ch->name, "weebweeb");
     ch->level = 200,
@@ -3265,10 +3283,12 @@ u16 chars_by_world(
     character_data* chars)
 {
     if (world_id != 0) {
+        prln("W: tried to get chars for non-existing world");
         return 0;
     }
 
     if (account_id != hardcoded_account_id) {
+        prln("W: tried to get chars for non-existing account");
         return 0;
     }
 
@@ -3676,7 +3696,7 @@ int channel_server(
     bot.id = client->char_id + 0x7fffffff;
     bot.face = 20000;
     bot.hair = 30000;
-    memset(bot.cover_equips, 0, sizeof(bot.cover_equips));
+    memeset(bot.cover_equips, 0, sizeof(bot.cover_equips));
     strcpy(bot.name, "Slave");
 
     /* --- */
@@ -3816,7 +3836,7 @@ int junoms(int argc, char const* argv[])
                !client.char_id ||
                !client.logged_in)
         {
-            memset(&client, 0, sizeof(client));
+            memeset(&client, 0, sizeof(client));
 
             if (login_server(sockfd, &client, &dst_world)) {
                 return 1;
