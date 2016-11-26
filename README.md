@@ -1,6 +1,6 @@
 JunoMS is a MapleStory v62 server emulator written in C without the standard 
 library or any dependency at all. Currently, the executable is under 30kb and 
-supports linux AMD64 only. Windows support is planned once the core features are
+supports linux i386 and AMD64 only. Windows support is planned once the core features are
 in place.
 
 I have learned many things from developing 
