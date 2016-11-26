@@ -25,7 +25,7 @@ typedef signed char i8;
 typedef i64 intptr;
 typedef u64 uintptr;
 
-#include "../linux_junoms.c"
+#include "../junoms.c"
 
 int main(int argc, char const* argv[]) {
     return junoms(argc, argv);
