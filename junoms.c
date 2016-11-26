@@ -3083,7 +3083,7 @@ internal
 void init_hardcoded_chars()
 {
     character_data* ch = hardcoded_chars;
-    memeset(ch, 0, sizeof(hardcoded_chars));
+    memeset(ch, 0, sizeof(character_data) * MAX_CHAR_SLOTS);
 
     strcpy(ch->name, "weebweeb");
     ch->level = 200,
@@ -3161,8 +3161,9 @@ internal
 void init_hardcoded_worlds()
 {
     u16 baseport = 7200;
-
     world_data* w = hardcoded_worlds;
+
+    memeset(w, 0, sizeof(world_data) * MAX_WORLDS);
 
     strcpy(w->name, "Meme World 0");
     w->ribbon = RIBBON_NO;
@@ -3493,6 +3494,12 @@ int login_server(
                 1441134000LL /* TODO */
             );
             break;
+
+        /* ----------------------------------------------------- */
+
+        case IN_RELOG:
+            send_relog_response(&con);
+            break;
         }
 
         /* ----------------------------------------------------- */
@@ -3600,12 +3607,6 @@ int login_server(
 
             break;
         }
-
-        /* ----------------------------------------------------- */
-
-        case IN_RELOG:
-            send_relog_response(&con);
-            break;
 
         /* ----------------------------------------------------- */
 
@@ -3814,7 +3815,7 @@ cleanup:
 internal
 int junoms(int argc, char const* argv[])
 {
-    prln("JunoMS pre-alpha v0.0.18");
+    prln("JunoMS pre-alpha v0.0.19");
 
     client_data client;
     world_data dst_world;
@@ -3831,6 +3832,9 @@ int junoms(int argc, char const* argv[])
         if (sockfd < 0) {
             return 1;
         }
+
+        memeset(&client, 0, sizeof(client));
+        memeset(&dst_world, 0, sizeof(world_data));
 
         while (!client.account_id ||
                !client.char_id ||
