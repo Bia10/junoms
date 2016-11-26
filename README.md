@@ -8,9 +8,18 @@ I have learned many things from developing
 is matching kagami's current functionality with way smaller executable size, 
 no dependencies, no stdlib and proceed from there.
 
-THIS CODE IS PUBLIC DOMAIN. YOU ARE FREE TO DO WHATEVER THE FUCK YOU WANT.
+# License
+This code is public domain and comes with no warranty. You are free
+to do whatever you want with it.
 
-Current status:
+You can contact me at
+[lolisamurai@tfwno.gf](mailto:lolisamurai@tfwno.gf) but don't
+expect any support.
+
+I hope you will find the code useful or at least interesting to
+read. Have fun!
+
+# Current status
 
 * Only handles 1 player at once for testing purposes
 * Most of the login server functionality is there, but with hardcoded accounts 
@@ -36,29 +45,32 @@ Goal roadmap:
 * Separate all the platform-specific code into a platform layer
 * Windows port
 
-# Usage
-You must be on linux x64 / amd64. This was only tested on linux 
-
+# Building (Linux 64-bit)
 ```bash
 git clone https://github.com/Francesco149/junoms.git
 cd junoms
-./build.sh
+chmod +x ./i386build.sh
+./i386build.sh
+./juno
 ```
 
+# Building (Linux 32-bit)
+```bash
+git clone https://github.com/Francesco149/junoms.git
+cd junoms
+chmod +x ./amd64build.sh
+./amd64build.sh
+./juno
+```
+
+# Usage
 You can check executable size with:
 
 ```bash
 wc -c juno
 ```
 
-
-Start the emulator:
-
-```bash
-./juno
-```
-
-Start a maplestory v62 localhost.
+Once juno is running, start a maplestory v62 localhost and connect.
 
 There are a few hardcoded accounts that you can use to test stuff:
 

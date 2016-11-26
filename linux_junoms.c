@@ -1,22 +1,48 @@
-#include "syscalls.h"
-
-typedef unsigned long long  u64;
-typedef unsigned int        u32;
-typedef unsigned short      u16;
-typedef unsigned char       u8;
-
-typedef long long   i64;
-typedef int         i32;
-typedef short       i16;
-typedef char        i8;
-
-typedef i32 b32;
-
-// TODO: find reliable ways to ensure that these types are the size I expect
+/*
+    This code is public domain and comes with no warranty.
+    You are free to do whatever you want with it. You can
+    contact me at lolisamurai@tfwno.gf but don't expect any
+    support.
+    I hope you will find the code useful or at least
+    interesting to read. Have fun!
+    -----------------------------------------------------------
+    This file is part of "junoms", a maplestory server emulator
+*/
 
 #define global_var static
 #define array_count(a) (sizeof(a) / sizeof((a)[0]))
 #define abs(v) ((v) < 0 ? -(v) : (v))
+
+typedef i32 b32;
+
+// -----------------------------------------------------------------------------
+
+typedef intptr syscall_t;
+
+void* syscall(syscall_t number);
+void* syscall1(syscall_t number, void* arg);
+void* syscall2(syscall_t number, void* arg1, void* arg2);
+
+void* syscall3(
+    syscall_t number,
+    void* arg1,
+    void* arg2,
+    void* arg3);
+
+void* syscall4(
+    syscall_t number,
+    void* arg1,
+    void* arg2,
+    void* arg3,
+    void* arg4);
+
+void* syscall5(
+    syscall_t number,
+    void* arg1,
+    void* arg2,
+    void* arg3,
+    void* arg4,
+    void* arg5);
 
 // -----------------------------------------------------------------------------
 
@@ -3478,9 +3504,9 @@ cleanup:
 // -----------------------------------------------------------------------------
 
 int
-main()
+junoms(int argc, char const* argv[])
 {
-    prln("JunoMS pre-alpha v0.0.16");
+    prln("JunoMS pre-alpha v0.0.17");
 
     client_data client;
     world_data dst_world; // this would normally be obtained through interserv
