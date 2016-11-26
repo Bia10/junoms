@@ -21,7 +21,7 @@
    int 0x80 is the intruction to enter syscalls.
 
    the rest is the same stuff as amd64 except with 32-bit
-   registers. see amd64_weeb.S for explanations */
+   registers. see amd64/start.S for explanations */
 
 .intel_syntax noprefix
 .text
