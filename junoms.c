@@ -253,10 +253,12 @@ int accept(int sockfd, sockaddr_in const* addr)
 }
 
 
+#define SOL_SOCKET  1
 #define IPPROTO_TCP 6
-#define TCP_NODELAY 1
 
-#if JMS_TCP_NODELAY
+#define TCP_NODELAY  1
+#define SO_REUSEADDR 2
+
 internal
 int setsockopt(
     int sockfd,
@@ -286,7 +288,6 @@ int setsockopt(
     return socketcall(SYS_SETSOCKOPT, args);
 #endif
 }
-#endif
 
 /* forces a flush of the pending packets on the next send */
 internal
@@ -1440,10 +1441,23 @@ void print_bytes_pre(char* prefix, u8* buf, intptr nbytes)
 internal
 int tcp_socket(u16 port)
 {
+    b32 const y = 1;
+
     int sockfd = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
     if (sockfd < 0) {
         die("Failed to create socket");
         return sockfd;
+    }
+
+    if (setsockopt(
+            sockfd,
+            SOL_SOCKET,
+            SO_REUSEADDR,
+            &y,
+            sizeof(b32)) < 0)
+    {
+        die("Failed to set SO_REUSEADDR");
+        return -1;
     }
 
     sockaddr_in serv_addr = {0};
@@ -3815,7 +3829,7 @@ cleanup:
 internal
 int junoms(int argc, char const* argv[])
 {
-    prln("JunoMS pre-alpha v0.0.19");
+    prln("JunoMS pre-alpha v0.0.20");
 
     client_data client;
     world_data dst_world;
