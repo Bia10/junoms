@@ -364,22 +364,22 @@ u8 ror(u8 v, u8 n) /* 1kpp hype */
 
 internal inline
 u64 unix_msec_to_filetime(u64 unix_mseconds) {
-    return epoch_diff + unix_mseconds * 10000LL;
+    return epoch_diff + unix_mseconds * 10000;
 }
 
 internal inline
 u64 unix_to_filetime(u64 unix_seconds) {
-    return unix_msec_to_filetime(unix_seconds * 1000LL);
+    return unix_msec_to_filetime(unix_seconds * 1000);
 }
 
 internal inline
 u64 filetime_to_unix_msec(u64 filetime) {
-    return (filetime - epoch_diff) / 10000LL;
+    return (filetime - epoch_diff) / 10000;
 }
 
 internal inline
 u64 filetime_to_unix(u64 filetime) {
-    return filetime_to_unix_msec(filetime) / 1000LL;
+    return filetime_to_unix_msec(filetime) / 1000;
 }
 
 #define CLOCK_REALTIME 0
@@ -405,7 +405,7 @@ u64 unix_now_msec()
 {
     timespec ts = {0};
     clock_gettime(CLOCK_REALTIME, &ts);
-    return ts.sec * 1000 + ts.nsec / 1000000;
+    return (u64)ts.sec * 1000 + (u64)ts.nsec / 1000000;
 }
 
 internal inline
@@ -3814,7 +3814,7 @@ cleanup:
 internal
 int junoms(int argc, char const* argv[])
 {
-    prln("JunoMS pre-alpha v0.0.17");
+    prln("JunoMS pre-alpha v0.0.18");
 
     client_data client;
     world_data dst_world;
